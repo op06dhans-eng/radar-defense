@@ -305,7 +305,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.4（可回到選擇身分）';
+const VERSION = '2.5';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1843,7 +1843,9 @@ function renderCfg() {
   $('tCfg').classList.toggle('lock', TS.phase === 'count' || TS.phase === 'wave' || TS.rehearsal);
 }
 function applyCfg() { ST_INFO.radar.hp = CFG.hp; STATIONS.radar.max = CFG.hp; SORTIES = CFG.sorties; if (!Q.get('wave')) WAVE_SEC = CFG.sec; }
-function studentURL() { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'play.html'; }
+// 學生網址：從 GitHub 網頁打開時用同一個資料夾的 play.html；從下載的檔案打開時，固定指向 GitHub 上的學生網址
+const PUBLIC_PLAY = 'https://op06dhans-eng.github.io/radar-defense/play.html';
+function studentURL() { return location.protocol === 'file:' ? PUBLIC_PLAY : location.origin + location.pathname.replace(/[^/]*$/, '') + 'play.html'; }
 
 function teacherInit() {
   ROLE = 'teacher'; show(null); setView('defend'); $('tPanel').hidden = false;
