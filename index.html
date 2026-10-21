@@ -1489,7 +1489,7 @@ function showResult() {
   addEventListener('keydown', (e) => { if (ROLE !== 'student') return; IN.keys[e.code] = true; if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', (e) => { IN.keys[e.code] = false; });
   addEventListener('blur', () => { IN.keys = {}; IN.boost = false; });
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('contextmenu', (e) => { if (MODE === 'menu' || e.target.closest('.scr, .tpanel')) return; e.preventDefault(); });
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   $('practice1').onclick = startPractice; $('practice2').onclick = startPractice;
   $('qBtn').onclick = () => { QUALITY = QUALITY === 'high' ? 'low' : 'high'; store.set('q', QUALITY); applyQuality(); $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; };
