@@ -305,7 +305,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.5';
+const VERSION = '2.6（起飛避開樹叢）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1533,15 +1533,30 @@ function endWave() {
   fpvPass.uniforms.glitch.value = 0; resetLocalFx(); setView('menu');
 }
 function abortWave() { endWave(); }
+// 起飛前檢查前方 260 公尺的航線：樹叢、白楊樹、小山擋路時換位置；都不行就把高度抬到障礙物上方
+function pathNeed(p, len) {
+  const dx = -p.x, dz = -p.z, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L; let need = 0;
+  for (let s = 0; s <= len; s += 6) {
+    const x = p.x + ux * s, z = p.z + uz * s;
+    need = Math.max(need, height(x, z) + 4);
+    for (const b of BUSHES) { const ddx = b.x - x, ddz = b.z - z; if (ddx * ddx + ddz * ddz < (b.r + 4) * (b.r + 4)) need = Math.max(need, b.top + 3); }
+  }
+  return need;
+}
 function spawnPoint() {
-  const a = -Math.PI / 2 + (R() - 0.5) * 1.6, r = 680 + R() * 120;
-  const p = V(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = height(p.x, p.z) + 8 + R() * 6;
-  for (const b of BUSHES) if (Math.hypot(b.x - p.x, b.z - p.z) < b.r + 30) p.y = Math.max(p.y, b.top + 4); // 不要生在樹叢裡
-  return p;
+  let best = null;
+  for (let i = 0; i < 24; i++) {
+    const a = -Math.PI / 2 + (R() - 0.5) * 1.6, r = 680 + R() * 120;
+    const p = V(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = height(p.x, p.z) + 8 + R() * 6;
+    const need = pathNeed(p, 260);
+    if (need <= p.y) return p; // 前方航線暢通
+    if (!best || need - p.y < best.gap) best = { p, gap: need - p.y, need };
+  }
+  best.p.y = best.need + 2; return best.p;
 }
 function launchSortie() {
   G.used++; F.sortie = (G.mode === 'practice' ? 900 : G.wave * 10) + G.used;
-  const p = spawnPoint(); F.pos.copy(p); F.yaw = Math.atan2(p.x, p.z) + (R() - 0.5) * 0.2; F.pitch = -0.04; F.roll = 0; F.speed = 61; F.vel.set(0, 0, 0); F.flying = true; F.outT = 0; F.sendT = 0;
+  const p = spawnPoint(); F.pos.copy(p); F.yaw = Math.atan2(p.x, p.z); F.pitch = 0; F.roll = 0; F.speed = 61; F.vel.set(0, 0, 0); F.flying = true; F.outT = 0; F.sendT = 0;
   if (!SELF) SELF = { id: ME.pid, isSelf: true, pos: F.pos, vel: F.vel, alive: false, netting: false };
   SELF.alive = true; SELF.netting = false; SELF.sortie = F.sortie;
   if (G.mode === 'practice') contacts.set(SELF.id, SELF);
