@@ -267,7 +267,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '1.9（機槍回音與連射修正）';
+const VERSION = '2.0（機砲音效、微波 3 次）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -808,22 +808,23 @@ const SFX = (() => {
     mus.pad = [0, 1, 2].map(i => { const o = ctx.createOscillator(); o.type = i === 2 ? 'sine' : 'triangle'; o.frequency.value = 110; o.detune.value = (i - 1) * 7; o.connect(padF); o.start(); return o; });
     setInterval(schedule, 50);
   }
-  // 預先合成一發機槍射擊聲：槍口爆裂、槍身悶響、低頻衝擊、機件聲、戶外回音
-  // 預先合成一發機槍射擊聲：超音速爆裂、槍口爆風、胸口低頻衝擊、機件後座聲
+  // 預先合成一發機砲射擊聲（大口徑）：爆裂、厚重的砲口爆風、深沉衝擊、機件撞擊、低頻餘震
   function makeGunShot(v) {
-    const sr = ctx.sampleRate, n = Math.floor(sr * 0.45), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
-    let lpA = 0, lpB = 0, hpPrev = 0, ph = 0; const kA = 1 - Math.exp(-2 * Math.PI * (1100 + v * 150) / sr), kB = 1 - Math.exp(-2 * Math.PI * 180 / sr);
-    const jit = 0.85 + Math.random() * 0.3;
+    const sr = ctx.sampleRate, n = Math.floor(sr * 0.6), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+    let lpA = 0, lpB = 0, lpC = 0, hpPrev = 0, ph = 0, ph2 = 0; const kA = 1 - Math.exp(-2 * Math.PI * (650 + v * 80) / sr), kB = 1 - Math.exp(-2 * Math.PI * 110 / sr), kC = 1 - Math.exp(-2 * Math.PI * 2400 / sr);
+    const jit = 0.9 + Math.random() * 0.2;
     for (let i = 0; i < n; i++) {
       const t = i / sr, w = Math.random() * 2 - 1;
       const hp = w - hpPrev; hpPrev = w;
-      const crack = hp * Math.exp(-t / 0.0013) * 1.4;                                   // 清脆爆裂（極短）
-      lpA += kA * (w - lpA); const blast = lpA * 4.2 * (1 - Math.exp(-t / 0.0008)) * Math.exp(-t / (0.022 * jit)); // 槍口爆風
-      const f = 42 + 70 * Math.exp(-t / 0.018); ph += 2 * Math.PI * f / sr; const thump = Math.sin(ph) * Math.exp(-t / 0.07) * 1.0; // 胸口低頻
-      lpB += kB * (w - lpB); const rumble = lpB * 6 * (1 - Math.exp(-t / 0.01)) * Math.exp(-t / 0.12) * 0.5;
-      const tm = t - 0.011 - v * 0.0015; const mech = tm > 0 ? (Math.sin(2 * Math.PI * 1850 * tm) + 0.6 * Math.sin(2 * Math.PI * 3300 * tm)) * Math.exp(-tm / 0.006) * 0.1 : 0; // 機件後座
-      let x = crack + blast + thump + rumble + mech;
-      d[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); // 輕微飽和，聽起來更有力
+      lpC += kC * (w - lpC);
+      const crack = (hp * 0.9 + lpC * 1.2) * Math.exp(-t / 0.0025);                       // 爆裂
+      lpA += kA * (w - lpA); const blast = lpA * 5 * (1 - Math.exp(-t / 0.0015)) * Math.exp(-t / (0.055 * jit)); // 厚重的砲口爆風
+      const f = 34 + 85 * Math.exp(-t / 0.025); ph += 2 * Math.PI * f / sr; const boom = Math.sin(ph) * Math.exp(-t / 0.13) * 1.25; // 深沉衝擊「咚」
+      ph2 += 2 * Math.PI * (f * 1.5) / sr; const boom2 = Math.sin(ph2) * Math.exp(-t / 0.05) * 0.35;
+      lpB += kB * (w - lpB); const rumble = lpB * 9 * (1 - Math.exp(-t / 0.02)) * Math.exp(-t / 0.22) * 0.5; // 低頻餘震
+      const tm = t - 0.034 - v * 0.002; const mech = tm > 0 ? (Math.sin(2 * Math.PI * 820 * tm) + 0.7 * Math.sin(2 * Math.PI * 1390 * tm) + 0.4 * Math.sin(2 * Math.PI * 2260 * tm)) * Math.exp(-tm / 0.014) * 0.14 : 0; // 退殼、機件撞擊
+      const x = crack + blast + boom + boom2 + rumble + mech;
+      d[i] = Math.tanh(x * 1.8) / Math.tanh(1.8);
     }
     let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i])); for (let i = 0; i < n; i++) d[i] *= 0.95 / pk;
     return buf;
@@ -854,7 +855,7 @@ const SFX = (() => {
     s.connect(f); f.connect(g);
     if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(master); } else g.connect(master);
     const sg = ctx.createGain(); sg.gain.value = gain * wet; f.connect(sg); sg.connect(verb);
-    s.start(t); s.stop(t + 0.5);
+    s.start(t); s.stop(t + 0.65);
     pending.push({ s, t }); if (pending.length > 40) pending.splice(0, pending.length - 40);
   }
   // 連射排程：提前排好約 0.3 秒，畫面卡頓時節奏不亂；放開時取消還沒響的
@@ -864,12 +865,12 @@ const SFX = (() => {
       if (burstT) { for (const p of pending) if (p.t > ctx.currentTime + 0.01) { try { p.s.stop(); } catch (_) {} } pending.length = 0; }
       burstT = 0; return;
     }
-    const gap = 0.085 + (4 - Math.min(4, Math.max(1, burstN))) * 0.02;
+    const gap = 0.14; // 機砲節奏：約每秒 7 發，機槍塔被摧毀也不變
     if (burstT < ctx.currentTime) burstT = ctx.currentTime + 0.01;
     while (burstT < ctx.currentTime + 0.3) {
       const ag = aliveGuns(); const tw = ag[burstSide = (burstSide + 1) % Math.max(1, ag.length)]; let pan = 0;
       if (tw) { const v = tw.center.clone().applyMatrix4(camera.matrixWorldInverse); pan = THREE.MathUtils.clamp(v.x / (Math.abs(v.z) + 12), -0.6, 0.6); }
-      playShot(burstT, 1.0, pan, 11000, 0.55); burstT += gap * (0.94 + Math.random() * 0.12);
+      playShot(burstT, 1.0, pan, 12000, 0.7); burstT += gap * (0.96 + Math.random() * 0.08);
     }
   }
   const ROOTS = [55, 43.65, 49, 41.2]; // A、F、G、E
@@ -947,7 +948,7 @@ const SFX = (() => {
     // 機槍：短促的爆裂聲加低頻悶響
     // 單發機槍聲（遠處的機槍塔；越遠越悶）
     gun(p) {
-      if (!ok() || !gunBufs.length) return; const now = ctx.currentTime; if (now - gunT < 0.05) return; gunT = now;
+      if (!ok() || !gunBufs.length) return; const now = ctx.currentTime; if (now - gunT < 0.1) return; gunT = now;
       const s = spatial(p, 45); if (s.g < 0.03) return;
       playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g, 0.35);
     },
@@ -1161,10 +1162,10 @@ function debris(p, v) {
    DEF.auth 為真時（老師、單人練習）由本機判定命中；
    學生連線時只播放畫面，擊落與否由老師的電腦通知
    ========================================================= */
-const MW_RANGE = 300, MW_CD = 15, MISSILES = 24, NETS = 8;
+const MW_RANGE = 300, MW_CD = 4, MW_SHOTS = 3, MISSILES = 24, NETS = 8;
 const DEF = {
   auth: false, botsOn: false,
-  W: { sel: 0, ammo: [Infinity, MISSILES, 0, NETS], cd: [0, 0, 0, 0] },
+  W: { sel: 0, ammo: [Infinity, MISSILES, MW_SHOTS, NETS], cd: [0, 0, 0, 0] },
   onKill: null, onImpact: null, onFx: null,
   kill(c, how) { if (!c || !c.alive) return; c.how = how; if (c.isSelf) { c.alive = false; playerDown(how); } else killVisual(c, { gun: 'boom', missile: 'boom', mw: 'drop', net: 'net' }[how] || how); if (this.onKill) this.onKill(c, how); },
   impact(c, k) { if (!c.alive) return; if (!c.isSelf) killVisual(c, 'hit'); if (this.onImpact) this.onImpact(c, k, c.pos.clone()); },
@@ -1206,7 +1207,7 @@ function fireMissile(target, force) {
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.4, 10), missileMat); nose.rotation.x = Math.PI / 2; nose.position.z = 1.3; body.add(nose);
   const plume = new THREE.Sprite(plumeMat); plume.scale.setScalar(4); plume.position.z = -1.3; body.add(plume);
   body.position.copy(p).addScaledVector(fwd, 2); scene.add(body); SFX.missile(body.position);
-  for (let i = 0; i < 12; i++) smoke.spawn(body.position, V(R() - 0.5, R() * 0.5, R() - 0.5).multiplyScalar(6), { life: 1.8 + R() * 1.2, s0: 1.2, s1: 4.5, a: 0.5, c0: SMOKE_L, drag: 2.2, rise: 0.8 });
+  const dfd = MODE === 'defend'; for (let i = 0; i < (dfd ? 6 : 12); i++) smoke.spawn(body.position, V(R() - 0.5, R() * 0.5, R() - 0.5).multiplyScalar(6), { life: dfd ? 0.7 + R() * 0.4 : 1.8 + R() * 1.2, s0: 1.2, s1: dfd ? 3 : 4.5, a: dfd ? 0.35 : 0.5, c0: SMOKE_L, drag: 2.2, rise: 0.8 });
   missiles.push({ body, plume, vel: fwd.clone().add(V(0, 0.8, 0)).normalize().multiplyScalar(30), target, t: 0, miss: false });
   if (DEF.onFx) DEF.onFx('m', target);
   return true;
@@ -1239,7 +1240,7 @@ function fireNet(target, force) {
 const jamFx = []; const waveGeo = new THREE.CylinderGeometry(1, 1, 14, 96, 1, true); waveGeo.translate(0, 5, 0);
 function fireJam(force) {
   const st = STATIONS.mw; if (st.dead) return false;
-  if (!force) { if (DEF.W.cd[2] > 0) return false; DEF.W.cd[2] = MW_CD; }
+  if (!force) { if (DEF.W.cd[2] > 0 || DEF.W.ammo[2] <= 0) return false; DEF.W.cd[2] = MW_CD; DEF.W.ammo[2]--; }
   const ring = new THREE.Mesh(waveGeo, new THREE.ShaderMaterial({ uniforms: { op: { value: 0.8 } }, vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }', fragmentShader: 'uniform float op; varying float vY; void main(){ float a = op * smoothstep(0.0, 0.25, vY) * (1.0 - vY); gl_FragColor = vec4(vec3(0.9, 1.2, 2.6) * a, a); }', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   ring.position.set(st.center.x, 0, st.center.z); scene.add(ring); jamFx.push({ ring, t: 0 }); SFX.microwave(st.center);
   if (DEF.auth) for (const c of contacts.values()) if (c.alive) { const d = Math.hypot(c.pos.x - st.center.x, c.pos.z - st.center.z); if (d < MW_RANGE) c.jamT = 0.02 + d / 160; }
@@ -1271,7 +1272,7 @@ function updateWeapons(dt) {
     const vis = MODE === 'student' ? Math.max(1, m.body.position.distanceTo(camera.position) / 80) : 1;
     m.plume.scale.setScalar((3.6 + Math.sin(m.t * 60) * 0.6) * vis);
     const back = m.vel.clone().normalize().multiplyScalar(-1.5);
-    const steps = MOBILE ? 2 : 3; for (let s = 0; s < steps; s++) { const p = m.body.position.clone().addScaledVector(m.vel, -dt * s / steps).add(back); smoke.spawn(p, V((R() - 0.5) * 1.5, (R() - 0.5) * 1.5, (R() - 0.5) * 1.5), { life: 4 + R() * 2, s0: 1.1 * vis, s1: 7 * Math.min(2, vis), a: 0.7, c0: MODE === 'student' ? [0.5, 0.48, 0.45] : [0.75, 0.72, 0.68], c1: MODE === 'student' ? [0.42, 0.4, 0.38] : [0.6, 0.58, 0.55], drag: 1.2, rise: 0.5 }); }
+    const steps = MOBILE ? 2 : 3; for (let s = 0; s < steps; s++) { const p = m.body.position.clone().addScaledVector(m.vel, -dt * s / steps).add(back); smoke.spawn(p, V((R() - 0.5) * 1.5, (R() - 0.5) * 1.5, (R() - 0.5) * 1.5), { life: MODE === 'defend' ? 1.0 + R() * 0.5 : 4 + R() * 2, s0: 1.1 * vis, s1: MODE === 'defend' ? 3.5 : 7 * Math.min(2, vis), a: MODE === 'defend' ? 0.45 : 0.7, c0: MODE === 'student' ? [0.5, 0.48, 0.45] : [0.75, 0.72, 0.68], c1: MODE === 'student' ? [0.42, 0.4, 0.38] : [0.6, 0.58, 0.55], drag: 1.2, rise: 0.5 }); }
     fire.spawn(m.body.position.clone().add(back), m.vel.clone().multiplyScalar(-0.1), { life: 0.12, s0: 1.4, s1: 0.6, a: 1, c0: [14, 8, 3], c1: [6, 2, 0.5] });
     let done = false;
     if (tracking && !m.miss) {
@@ -1324,7 +1325,7 @@ function clearWeapons() {
   for (const b of debrisList) scene.remove(b.m); debrisList.length = 0;
 }
 function resetDefense() {
-  DEF.W.ammo = [Infinity, MISSILES, 0, NETS]; DEF.W.cd = [0, 0, 0, 0];
+  DEF.W.ammo = [Infinity, MISSILES, MW_SHOTS, NETS]; DEF.W.cd = [0, 0, 0, 0];
   for (const k of ST_KEYS) setStation(k, ST_INFO[k].hp);
   for (const g of GUNS) { g.turret.rotation.y = 0; g.gun.rotation.x = 0; }
   clearWeapons(); smoke.clear(); fire.clear();
@@ -1345,7 +1346,7 @@ function autoDefend(dt, o) {
   }
   if (o.missiles) { const far = byDist.filter(c => c.pos.length() > 200 && c.pos.y - height(c.pos.x, c.pos.z) > 12 && !missiles.some(m => m.target === c))[0]; if (far && autoT.missile <= 0) { if (fireMissile(far)) autoT.missile = o.missileGap; } }
   if (o.nets) { const close = byDist.find(c => c.pos.length() < 170 && c.pos.length() > 40 && !netting.has(c)); if (close && autoT.net <= 0) { if (fireNet(close)) autoT.net = o.netGap; } }
-  if (o.mw && autoT.jam <= 0 && byDist.filter(c => c.pos.length() < MW_RANGE).length >= o.mwMin) { if (fireJam()) autoT.jam = MW_CD + 2; }
+  if (o.mw && autoT.jam <= 0 && byDist.filter(c => c.pos.length() < MW_RANGE).length >= o.mwMin) { if (fireJam()) autoT.jam = 15; }
 }
 
 /* =========================================================
@@ -1982,9 +1983,9 @@ function teacherHud(now) {
   const W = DEF.W;
   $('w0').textContent = g ? `${g} 座　滑鼠左鍵` : '全部被摧毀'; $('u0').style.width = (g / 4 * 100) + '%';
   $('w1').textContent = STATIONS.sam.dead ? '已被摧毀' : `自動　剩 ${W.ammo[1]} 枚`; $('u1').style.width = (W.ammo[1] / MISSILES * 100) + '%';
-  $('w2').textContent = STATIONS.mw.dead ? '已被摧毀' : W.cd[2] > 0 ? `冷卻 ${Math.ceil(W.cd[2])} 秒` : '空白鍵發射'; $('u2').style.width = ((MW_CD - W.cd[2]) / MW_CD * 100) + '%';
+  $('w2').textContent = STATIONS.mw.dead ? '已被摧毀' : W.ammo[2] <= 0 ? '已用完' : W.cd[2] > 0 ? `冷卻 ${Math.ceil(W.cd[2])} 秒` : `空白鍵　剩 ${W.ammo[2]} 次`; $('u2').style.width = (W.ammo[2] / MW_SHOTS * 100) + '%';
   $('w3').textContent = STATIONS.net.dead ? '已被摧毀' : `自動　剩 ${W.ammo[3]} 發`; $('u3').style.width = (W.ammo[3] / NETS * 100) + '%';
-  document.querySelectorAll('#wbar button').forEach((b, i) => { b.classList.toggle('on', i === 0 ? D.fire : i === 2 ? W.cd[2] <= 0 && !STATIONS.mw.dead : false); b.classList.toggle('off', [!g, STATIONS.sam.dead, STATIONS.mw.dead, STATIONS.net.dead][i]); });
+  document.querySelectorAll('#wbar button').forEach((b, i) => { b.classList.toggle('on', i === 0 ? D.fire : i === 2 ? W.cd[2] <= 0 && W.ammo[2] > 0 && !STATIONS.mw.dead : false); b.classList.toggle('off', [!g, STATIONS.sam.dead, STATIONS.mw.dead, STATIONS.net.dead][i]); });
   let air = 0; for (const c of contacts.values()) if (c.alive) air++;
   const t = TS.tally; const shot = t ? t.kills.gun + t.kills.missile + t.kills.mw + t.kills.net : 0;
   $('tAir').textContent = (TS.phase === 'wave' || TS.rehearsal) ? `空中 ${air} 架　已擊落 ${shot} 架` : '';
