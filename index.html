@@ -267,6 +267,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
+const VERSION = '1.8（機槍音效更新）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1734,7 +1735,7 @@ function teacherInit() {
   NET.onChild('req', { added: (pid, r) => handleReq(pid, r) });
   NET.onChild('pos', { added: (pid, a) => posIn(pid, a), changed: (pid, a) => posIn(pid, a), removed: (pid) => { const c = contacts.get(pid); if (c && !c.isBot && c.alive) killVisual(c, 'gone'); } });
   NET.onChild('hit', { added: (key, h) => { NET.remove('hit/' + key); if (!h || TS.phase !== 'wave') return; const c = contacts.get(h.p); if (c && c.sortie === h.s && c.alive) killVisual(c, 'hit'); applyImpact(h.k === 'ground' ? null : h.k, V(h.x, h.y, h.z), c); } });
-  setInterval(() => { $('tNet').textContent = NET.local ? '練習連線模式（同一台電腦）' : (NET.online ? '已連上線上資料庫' : '連線中…（請確認網路）'); }, 1000);
+  setInterval(() => { $('tNet').textContent = (NET.local ? '練習連線模式（同一台電腦）' : (NET.online ? '已連上線上資料庫' : '連線中…（請確認網路）')) + `　版本 ${VERSION}`; }, 1000);
   renderTeams(); renderGo(); renderBoard();
 }
 function teacherHooks() {
