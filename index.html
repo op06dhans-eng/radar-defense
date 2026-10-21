@@ -267,7 +267,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.0（機砲音效、微波 3 次）';
+const VERSION = '2.1（方陣快砲彈幕）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -846,33 +846,42 @@ const SFX = (() => {
     const conv = ctx.createConvolver(); conv.buffer = ir; const g = ctx.createGain(); g.gain.value = 0.55; conv.connect(g); g.connect(master);
     return conv;
   }
-  const pending = [];
-  function playShot(t, gain, pan, cutoff, wet = 0.6) {
-    if (!verb) verb = makeVerb();
-    const s = ctx.createBufferSource(); s.buffer = gunBufs[Math.floor(Math.random() * gunBufs.length)]; s.playbackRate.value = 0.95 + Math.random() * 0.1;
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = 0.5;
-    const g = ctx.createGain(); g.gain.value = gain * (0.85 + Math.random() * 0.15);
-    s.connect(f); f.connect(g);
-    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(master); } else g.connect(master);
-    const sg = ctx.createGain(); sg.gain.value = gain * wet; f.connect(sg); sg.connect(verb);
-    s.start(t); s.stop(t + 0.65);
-    pending.push({ s, t }); if (pending.length > 40) pending.splice(0, pending.length - 40);
-  }
-  // 連射排程：提前排好約 0.3 秒，畫面卡頓時節奏不亂；放開時取消還沒響的
-  function scheduleGuns() {
-    if (!ctx) return;
-    if (!burstOn || !on || !gunBufs.length) {
-      if (burstT) { for (const p of pending) if (p.t > ctx.currentTime + 0.01) { try { p.s.stop(); } catch (_) {} } pending.length = 0; }
-      burstT = 0; return;
+  // 方陣快砲式的連續轟鳴：每秒約 55 發的深沉砲聲連在一起
+  function makeBrrrt() {
+    const sr = ctx.sampleRate, n = sr, buf = ctx.createBuffer(2, n, sr), rate = 55, per = n / rate;
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch); let lp = 0, lpR = 0; const kL = 1 - Math.exp(-2 * Math.PI * 900 / sr), kR = 1 - Math.exp(-2 * Math.PI * 90 / sr);
+      for (let p = 0; p < rate; p++) {
+        const st = Math.floor(p * per + (Math.random() - 0.5) * per * 0.12 + ch * 7); const amp = 0.8 + Math.random() * 0.3; let ph = 0, hpPrev = 0; lp = 0;
+        for (let i = 0; i < per * 2.2; i++) {
+          const t = i / sr, w = Math.random() * 2 - 1; const hp = w - hpPrev; hpPrev = w; lp += kL * (w - lp);
+          const f = 52 + 70 * Math.exp(-t / 0.006); ph += 2 * Math.PI * f / sr;
+          const x = (hp * 0.6 * Math.exp(-t / 0.0012) + lp * 3.2 * Math.exp(-t / 0.007) + Math.sin(ph) * 1.1 * Math.exp(-t / 0.016)) * amp;
+          d[(st + i + n) % n] += x;
+        }
+      }
+      for (let i = 0; i < n; i++) { lpR += kR * ((Math.random() * 2 - 1) - lpR); d[i] += lpR * 3.5; }
+      for (let i = 0; i < n; i++) d[i] = Math.tanh(d[i] * 0.9);
     }
-    const gap = 0.14; // 機砲節奏：約每秒 7 發，機槍塔被摧毀也不變
-    if (burstT < ctx.currentTime) burstT = ctx.currentTime + 0.01;
-    while (burstT < ctx.currentTime + 0.3) {
-      const ag = aliveGuns(); const tw = ag[burstSide = (burstSide + 1) % Math.max(1, ag.length)]; let pan = 0;
-      if (tw) { const v = tw.center.clone().applyMatrix4(camera.matrixWorldInverse); pan = THREE.MathUtils.clamp(v.x / (Math.abs(v.z) + 12), -0.6, 0.6); }
-      playShot(burstT, 1.0, pan, 12000, 0.7); burstT += gap * (0.96 + Math.random() * 0.08);
-    }
+    let pk = 0; for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i])); }
+    for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < n; i++) d[i] *= 0.95 / pk; }
+    return buf;
   }
+  let brr = null;
+  function gunLoop(gain, cutoff) {
+    if (!gunBufs.length) return;
+    if (!brr) {
+      if (!verb) verb = makeVerb();
+      const src = ctx.createBufferSource(); src.buffer = makeBrrrt(); src.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 12000; f.Q.value = 0.4;
+      const g = ctx.createGain(); g.gain.value = 0; const sg = ctx.createGain(); sg.gain.value = 0.8;
+      src.connect(f); f.connect(g); g.connect(master); g.connect(sg); sg.connect(verb); src.start();
+      brr = { g, f };
+    }
+    brr.g.gain.setTargetAtTime(gain, ctx.currentTime, gain > brr.g.gain.value ? 0.012 : 0.035);
+    brr.f.frequency.setTargetAtTime(cutoff, ctx.currentTime, 0.05);
+  }
+  function scheduleGuns() {}
   const ROOTS = [55, 43.65, 49, 41.2]; // A、F、G、E
   const BASS = [1, 1, 2, 1, 1, 2, 1, 1.5];
   function mTone(type, f0, f1, peak, dur, t, flt) {
@@ -948,12 +957,13 @@ const SFX = (() => {
     // 機槍：短促的爆裂聲加低頻悶響
     // 單發機槍聲（遠處的機槍塔；越遠越悶）
     gun(p) {
+      return;
       if (!ok() || !gunBufs.length) return; const now = ctx.currentTime; if (now - gunT < 0.1) return; gunT = now;
       const s = spatial(p, 45); if (s.g < 0.03) return;
       playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g, 0.35);
     },
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
-    _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, state: ctx && ctx.state }; },
+    _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
     gunBurst(firing, n) { burstOn = !!firing && n > 0 && ok(); burstN = n; },
     // 子彈從身邊飛過的咻聲
     whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
@@ -981,7 +991,11 @@ const SFX = (() => {
     update(dt) {
       if (!ctx) return;
       if (MODE !== 'defend') { musState = 0; burstOn = false; }
-      scheduleGuns();
+      if (on) {
+        let gl = 0;
+        for (const gt of GUNS) { if (gt.dead || gt.fireT > 0.12) continue; gl = Math.max(gl, MODE === 'defend' ? 1 : 1 / (1 + gt.center.distanceTo(camera.position) / 45)); }
+        gunLoop(gl * (MODE === 'defend' ? 0.95 : 0.9), MODE === 'defend' ? 12000 : 700 + 9000 * gl * gl);
+      } else if (brr) gunLoop(0, 1000);
       const fly = MODE === 'student' && F.flying;
       const dn = MODE === 'student' && S.down;
       // 自己的馬達：越快音調越高；被微波打中時馬達聲往下掉
@@ -1182,10 +1196,10 @@ function fireGun(st, dir) {
   st.fireT = 0;
   const muzzle = new THREE.Vector3(); st.gun.children[R() < 0.5 ? 0 : 2].getWorldPosition(muzzle);
   const m = new THREE.Mesh(tracerGeo, tracerMat); m.position.copy(muzzle); if (MODE === 'student') { const gl = new THREE.Sprite(tracerGlow); gl.scale.setScalar(1.1); m.add(gl); }
-  const v = dir.clone().add(V((R() - 0.5) * 0.014, (R() - 0.5) * 0.014, (R() - 0.5) * 0.014)).normalize().multiplyScalar(620);
+  const v = dir.clone().add(V((R() - 0.5) * 0.026, (R() - 0.5) * 0.026, (R() - 0.5) * 0.026)).normalize().multiplyScalar(620);
   m.lookAt(muzzle.clone().add(v)); scene.add(m); tracers.push({ m, v, life: 0 });
-  fire.spawn(muzzle.clone().addScaledVector(dir, 1.6), V(), { life: 0.06, s0: 1.3, s1: 1.7, a: 1, c0: [10, 6, 2] }); if (!(MODE === 'defend' && st.manual)) SFX.gun(muzzle);
-  if (R() < 0.4) smoke.spawn(muzzle.clone().addScaledVector(dir, 1.8), dir.clone().multiplyScalar(4), { life: 1.2, s0: 0.4, s1: 1.6, a: 0.22, c0: SMOKE_L, drag: 2, rise: 0.6 });
+  if (R() < 0.5) fire.spawn(muzzle.clone().addScaledVector(dir, 1.6), V(), { life: 0.04, s0: 0.7, s1: 0.9, a: 0.8, c0: [6, 3.6, 1.2] });
+  if (R() < 0.15) smoke.spawn(muzzle.clone().addScaledVector(dir, 1.8), dir.clone().multiplyScalar(4), { life: 1.2, s0: 0.4, s1: 1.6, a: 0.22, c0: SMOKE_L, drag: 2, rise: 0.6 });
 }
 function gunAt(st, p, dt, fast) {
   const local = st.group.worldToLocal(p.clone()); const yaw = Math.atan2(-local.x, -local.z); const dist = Math.hypot(local.x, local.z); const pitch = Math.atan2(local.y - st.turret.position.y - 0.4, dist);
@@ -1253,7 +1267,7 @@ function updateWeapons(dt) {
   // 曳光彈
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i]; tr.life += dt; const prev = tr.m.position.clone(); tr.m.position.addScaledVector(tr.v, dt);
-    if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < 0.35) DEF.kill(c, 'gun'); } }
+    if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < 0.16) DEF.kill(c, 'gun'); } }
     if (MODE === 'student' && SELF && SELF.alive && segDist(prev, tr.m.position, camera.position) < 5) nearMiss();
     if (tr.life > 1.4) { scene.remove(tr.m); tracers.splice(i, 1); }
   }
@@ -1692,7 +1706,7 @@ function studentTick(dt) {
   if (G.mode === 'wave' && GUNSTATE) GUNS.forEach((g, i) => {
     const s = GUNSTATE[i]; if (!s || g.dead) return;
     let dy = s[0] - g.turret.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); g.turret.rotation.y += dy * Math.min(1, dt * 8); g.gun.rotation.x += (s[1] - g.gun.rotation.x) * Math.min(1, dt * 8);
-    if (s[2] && R() < dt * 11) fireGun(g, gunDir(g));
+    if (s[2] && R() < dt * 26) fireGun(g, gunDir(g));
   });
 }
 function showResult() {
@@ -1948,7 +1962,7 @@ function teacherFrame(dt, time) {
     st.manual = firing;
     if (!firing) continue;
     const aim = tgt ? tgt.pos.clone().addScaledVector(tgt.vel, tgt.pos.distanceTo(st.center) / 620) : EYE.clone().addScaledVector(D.aimDir, 320);
-    const dd = gunAt(st, aim, dt, true); if (R() < dt * 11) fireGun(st, dd);
+    const dd = gunAt(st, aim, dt, true); if (R() < dt * 32) fireGun(st, dd);
   }
   // 飛彈與攔截網自己挑目標發射；機槍塔自動射擊預設關閉
   if (TS.phase === 'wave' || TS.rehearsal) autoDefend(dt, { gunRange: TS.autoGuns ? 170 : -1, gunCd: 0.12, gunErr: 4, missiles: true, missileGap: 3.5, nets: true, netGap: 3 });
@@ -1962,7 +1976,6 @@ function teacherFrame(dt, time) {
   $('hudT').classList.toggle('wp', !$('tPanel').hidden);
   pipUpdate(dt);
   drawScope(dt);
-  SFX.gunBurst(firing, aliveGuns().length);
   const tl = (TS.endsAt - now) / 1000;
   SFX.setMusic((TS.phase === 'wave' || TS.rehearsal) ? (tl < 10 ? 2 : 1) : TS.phase === 'count' ? 1 : 0);
   teacherHud(now);
