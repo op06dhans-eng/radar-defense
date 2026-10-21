@@ -266,7 +266,9 @@ const FIREBASE_CONFIG = {
 };
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
-let ROLE = Q.has('teacher') ? 'teacher' : (Q.has('student') ? 'student' : (LOCAL ? null : 'student'));
+// 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
+const IS_PLAY = /play(\.html)?$/.test(location.pathname);
+let ROLE = Q.has('teacher') ? 'teacher' : (Q.has('student') || IS_PLAY) ? 'student' : (LOCAL ? null : 'teacher');
 const MOBILE = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 900;
 const TEXDIR = MOBILE ? 'tex/m/' : 'tex/';
 const BUSHES = [];
@@ -1314,7 +1316,7 @@ function onMeta() {
 }
 function waitScreen() {
   if (ME.team < 0) return;
-  const t = TEAMS[ME.team]; const b = $('wBadge'); b.style.setProperty('--c', t.c); b.textContent = `${t.name}　${ME.call}`;
+  const t = TEAMS[ME.team]; const b = $('wBadge'); b.style.setProperty('--c', t.c); b.textContent = ME.call || t.name;
   let title = '等待老師開始', text = '輪到你們這一隊時，畫面會自動倒數起飛。也可以先單人練習飛行。';
   if ((META.phase === 'count' || META.phase === 'wave') && !myTurn()) { title = `現在是${META.team === ALL ? '全班' : TEAMS[META.team].name}上場`; text = '看投影幕，等一下就輪到你們。'; }
   if (G.mode === 'done') { title = `你的 ${SORTIES} 架都出擊完了`; text = '看投影幕，等這一波結束。'; }
@@ -1629,7 +1631,7 @@ const CALLS = ['獵鷹', '黃蜂', '夜梟', '雨燕', '赤隼', '青鷺', '雷�
 const D = { yaw: 0, pitch: 0.04, drag: false, sx: 0, sy: 0, mx: -1, my: -1, fire: false, aimDir: V(0, 0, -1) };
 const EYE = V(0, 11, 36);
 function freshTally() { return { radar: 0, dest: [], kills: { gun: 0, missile: 0, mw: 0, net: 0, crash: 0 }, sorties: new Set(), usedM: 0, usedN: 0, usedW: 0 }; }
-function studentURL() { return location.origin + location.pathname; }
+function studentURL() { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'play.html'; }
 
 function teacherInit() {
   ROLE = 'teacher'; show(null); setView('defend'); $('tPanel').hidden = false;
@@ -1687,9 +1689,11 @@ function handleReq(pid, r) {
   if (TPLAYERS[pid]) return;
   const n = Object.values(TPLAYERS).filter(p => p && p.team === r.team).length;
   if (n >= TEAM_MAX) { NET.set('ans/' + pid, 'full'); return; }
-  const used = new Set(Object.values(TPLAYERS).map(p => p && p.call));
-  let call = ''; for (let i = 0; i < 200 && (!call || used.has(call)); i++) call = CALLS[Math.floor(R() * CALLS.length)] + '-' + (10 + Math.floor(R() * 89));
-  const rec = { team: r.team, call, at: NET.now() };
+  // 代號依隊伍照順序編號：藍隊 1 號、藍隊 2 號……（空出來的號碼先補）
+  const used = new Set(Object.values(TPLAYERS).filter(p => p && p.team === r.team).map(p => p.no));
+  let no = 1; while (used.has(no)) no++;
+  const call = `${TEAMS[r.team].name} ${no} 號`;
+  const rec = { team: r.team, no, call, at: NET.now() };
   TPLAYERS[pid] = rec; NET.set('players/' + pid, rec); renderTeams();
 }
 function posIn(pid, a) {
