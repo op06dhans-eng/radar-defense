@@ -178,7 +178,7 @@ table.board th { color: var(--muted); font-weight: 700; }
   <section class="scr" id="scrJoin" hidden>
     <div class="card">
       <h1>雷達站攻防</h1>
-      <p>老師守著一座雷達站，旁邊有機槍塔、防空飛彈、微波武器和攔截網。你們要親手駕駛 FPV 自殺無人機衝過去。可以直接撞雷達站，也可以先撞掉防空設備。每一波 60 秒，每人最多出擊 3 架。</p>
+      <p>老師守著一座雷達站，旁邊有機槍塔、防空飛彈、微波武器和攔截網。你們要親手駕駛 FPV 自殺無人機衝過去。可以直接撞雷達站，也可以先撞掉防空設備。每一波 60 秒，每人最多出擊 5 架。</p>
       <h2>選一隊加入（每隊最多 15 人）</h2>
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
@@ -267,7 +267,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.1（方陣快砲彈幕）';
+const VERSION = '2.2（每人 5 架、網住加快）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -281,7 +281,7 @@ let QUALITY = store.get('q', MOBILE ? 'low' : 'high');
 let MODE = 'menu'; // menu | student | defend
 const TEAMS = [{ name: '紅隊', c: '#ff5a4e' }, { name: '藍隊', c: '#4ea3ff' }, { name: '綠隊', c: '#3fd17a' }, { name: '黃隊', c: '#ffc83d' }];
 const ALL = 4; // 最後一波：全班
-const TEAM_MAX = 15, SORTIES = 3, WAVE_SEC = +Q.get('wave') || 60, COUNT_SEC = 5;
+const TEAM_MAX = 15, SORTIES = 5, WAVE_SEC = +Q.get('wave') || 60, COUNT_SEC = 5;
 const $ = (id) => document.getElementById(id);
 
 /* =========================================================
@@ -1594,13 +1594,13 @@ function downFrame(dt) {
     } else if (d.type === 'net') {
       if (d.t < 0.3) netOv.scale.setScalar(3 - d.t / 0.3 * 1.75); else netOv.scale.setScalar(1.25 + Math.sin(d.t * 3) * 0.03);
       netOv.rotation.z = Math.sin(d.t * 1.3) * 0.08;
-      if (d.t < 0.7) { d.vel.x *= Math.exp(-3.5 * dt); d.vel.z *= Math.exp(-3.5 * dt); d.vel.y -= 9.8 * 0.55 * dt; d.yaw += 3.2 * dt; d.roll = Math.sin(d.t * 9) * 0.25; }
+      if (d.t < 0.45) { d.vel.x *= Math.exp(-4.5 * dt); d.vel.z *= Math.exp(-4.5 * dt); d.vel.y -= 9.8 * 0.8 * dt; d.yaw += 3.6 * dt; d.roll = Math.sin(d.t * 9) * 0.25; }
       else {
         if (!d.chute) { d.chute = true; d.shake = 0.45; alertMsg('降落傘張開'); }
-        d.vel.x *= Math.exp(-2 * dt); d.vel.z *= Math.exp(-2 * dt); d.vel.y += (-4.5 - d.vel.y) * Math.min(1, dt * 4);
-        d.pitch += (-1.0 - d.pitch) * Math.min(1, dt * 2.5); d.yaw += 0.7 * dt; d.roll = Math.sin(d.t * 1.6) * 0.12;
+        d.vel.x *= Math.exp(-2 * dt); d.vel.z *= Math.exp(-2 * dt); d.vel.y += (-9 - d.vel.y) * Math.min(1, dt * 4);
+        d.pitch += (-1.0 - d.pitch) * Math.min(1, dt * 4); d.yaw += 0.7 * dt; d.roll = Math.sin(d.t * 1.6) * 0.12;
       }
-      if (d.t > 12) finishRun(false, 2.4);
+      if (d.t > 3.5) finishRun(false, 1.8);
     }
     camera.position.addScaledVector(d.vel, dt);
     const g = height(camera.position.x, camera.position.z) + 0.35;
@@ -1614,7 +1614,7 @@ function downFrame(dt) {
     }
   } else if (!d.done) {
     if (d.type === 'mw' && d.t - d.ground > 0.4) finishRun(true, 2.4);
-    if (d.type === 'net' && d.t - d.ground > 0.8) finishRun(false, 2.4);
+    if (d.type === 'net' && d.t - d.ground > 0.4) finishRun(false, 1.8);
   }
   d.shake = Math.max(0, d.shake - dt * 1.8);
   const sh = d.shake * 0.08;
