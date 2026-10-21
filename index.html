@@ -267,7 +267,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '1.8（機槍音效更新）';
+const VERSION = '1.9（機槍回音與連射修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -784,7 +784,7 @@ function renderMask() {
 const SFX = (() => {
   let ctx = null, master = null, noiseBuf = null, gunT = 0;
   let on = store.get('snd', true);
-  let gunBufs = [], burstOn = false, burstN = 4, burstT = 0, burstSide = 1;
+  let gunBufs = [], burstOn = false, burstN = 4, burstT = 0, burstSide = 0;
   let musOn = store.get('mus', true), musState = 0, mus = null, nextT = 0, step = 0;
   const L = {};
   const clamp = THREE.MathUtils.clamp;
@@ -795,7 +795,7 @@ const SFX = (() => {
     const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -20; comp.knee.value = 12; comp.ratio.value = 8; comp.attack.value = 0.01; comp.release.value = 0.25;
     master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    gunBufs = [0, 1, 2].map(makeGunShot);
+    gunBufs = [0, 1, 2, 3, 4].map(makeGunShot);
     // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
     L.motor = loopOsc(['sawtooth', 'sawtooth'], 'lowpass', 1600);
     L.wind = loopNoise('bandpass', 520, 0.7);
@@ -809,36 +809,68 @@ const SFX = (() => {
     setInterval(schedule, 50);
   }
   // 預先合成一發機槍射擊聲：槍口爆裂、槍身悶響、低頻衝擊、機件聲、戶外回音
+  // 預先合成一發機槍射擊聲：超音速爆裂、槍口爆風、胸口低頻衝擊、機件後座聲
   function makeGunShot(v) {
-    const sr = ctx.sampleRate, n = Math.floor(sr * 0.7), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
-    let lp1 = 0, lp2 = 0, lp3 = 0, hpPrev = 0, ph = 0; const k1 = 1 - Math.exp(-2 * Math.PI * (700 + v * 120) / sr), k2 = 1 - Math.exp(-2 * Math.PI * 260 / sr), k3 = 1 - Math.exp(-2 * Math.PI * 1500 / sr);
+    const sr = ctx.sampleRate, n = Math.floor(sr * 0.45), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+    let lpA = 0, lpB = 0, hpPrev = 0, ph = 0; const kA = 1 - Math.exp(-2 * Math.PI * (1100 + v * 150) / sr), kB = 1 - Math.exp(-2 * Math.PI * 180 / sr);
+    const jit = 0.85 + Math.random() * 0.3;
     for (let i = 0; i < n; i++) {
       const t = i / sr, w = Math.random() * 2 - 1;
-      const hp = w - hpPrev; hpPrev = w; // 高頻爆裂
-      const crack = hp * Math.exp(-t / 0.0022) * 1.1;
-      lp1 += k1 * (w - lp1); const body = lp1 * Math.exp(-t / (0.028 + v * 0.004)) * 3.2;
-      const f = 48 + 55 * Math.exp(-t / 0.03); ph += 2 * Math.PI * f / sr; const thump = Math.sin(ph) * Math.exp(-t / 0.055) * 0.85;
-      const tm = t - 0.022 - v * 0.002; const clank = tm > 0 ? Math.sin(2 * Math.PI * 2900 * tm) * Math.exp(-tm / 0.004) * 0.12 : 0;
-      lp2 += k2 * (w - lp2); const te = t - 0.012; const tail = te > 0 ? lp2 * 2.2 * (Math.exp(-te / 0.22) - Math.exp(-te / 0.02)) * 0.55 : 0;
-      const ee = t - 0.11; lp3 += k3 * (w - lp3); const echo = ee > 0 ? lp3 * Math.exp(-ee / 0.09) * 0.22 * (1 - Math.exp(-ee / 0.01)) : 0;
-      d[i] = crack + body + thump + clank + tail + echo;
+      const hp = w - hpPrev; hpPrev = w;
+      const crack = hp * Math.exp(-t / 0.0013) * 1.4;                                   // 清脆爆裂（極短）
+      lpA += kA * (w - lpA); const blast = lpA * 4.2 * (1 - Math.exp(-t / 0.0008)) * Math.exp(-t / (0.022 * jit)); // 槍口爆風
+      const f = 42 + 70 * Math.exp(-t / 0.018); ph += 2 * Math.PI * f / sr; const thump = Math.sin(ph) * Math.exp(-t / 0.07) * 1.0; // 胸口低頻
+      lpB += kB * (w - lpB); const rumble = lpB * 6 * (1 - Math.exp(-t / 0.01)) * Math.exp(-t / 0.12) * 0.5;
+      const tm = t - 0.011 - v * 0.0015; const mech = tm > 0 ? (Math.sin(2 * Math.PI * 1850 * tm) + 0.6 * Math.sin(2 * Math.PI * 3300 * tm)) * Math.exp(-tm / 0.006) * 0.1 : 0; // 機件後座
+      let x = crack + blast + thump + rumble + mech;
+      d[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); // 輕微飽和，聽起來更有力
     }
     let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i])); for (let i = 0; i < n; i++) d[i] *= 0.95 / pk;
     return buf;
   }
-  function playShot(t, gain, pan, cutoff) {
-    const s = ctx.createBufferSource(); s.buffer = gunBufs[Math.floor(Math.random() * gunBufs.length)]; s.playbackRate.value = 0.94 + Math.random() * 0.12;
+  // 戶外回音：地形反彈的隆隆回聲（連射時會疊成持續的低沉轟鳴）
+  let verb = null;
+  function makeVerb() {
+    const sr = ctx.sampleRate, n = Math.floor(sr * 1.8), ir = ctx.createBuffer(2, n, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch); let lp = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / sr; const cut = 4000 * Math.exp(-t / 0.25) + 300; const k = 1 - Math.exp(-2 * Math.PI * cut / sr);
+        lp += k * ((Math.random() * 2 - 1) - lp);
+        let x = lp * Math.exp(-t / 0.42) * (1 - Math.exp(-t / 0.03));
+        for (const [et, ea] of [[0.07 + ch * 0.013, 0.5], [0.16 - ch * 0.01, 0.35], [0.31 + ch * 0.02, 0.22], [0.55, 0.12]]) { const dt2 = t - et; if (dt2 > 0 && dt2 < 0.03) x += (Math.random() * 2 - 1) * ea * Math.exp(-dt2 / 0.008); }
+        d[i] = x;
+      }
+    }
+    const conv = ctx.createConvolver(); conv.buffer = ir; const g = ctx.createGain(); g.gain.value = 0.55; conv.connect(g); g.connect(master);
+    return conv;
+  }
+  const pending = [];
+  function playShot(t, gain, pan, cutoff, wet = 0.6) {
+    if (!verb) verb = makeVerb();
+    const s = ctx.createBufferSource(); s.buffer = gunBufs[Math.floor(Math.random() * gunBufs.length)]; s.playbackRate.value = 0.95 + Math.random() * 0.1;
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = 0.5;
-    const g = ctx.createGain(); g.gain.value = gain * (0.88 + Math.random() * 0.12);
+    const g = ctx.createGain(); g.gain.value = gain * (0.85 + Math.random() * 0.15);
     s.connect(f); f.connect(g);
     if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(master); } else g.connect(master);
-    s.start(t); s.stop(t + 0.75);
+    const sg = ctx.createGain(); sg.gain.value = gain * wet; f.connect(sg); sg.connect(verb);
+    s.start(t); s.stop(t + 0.5);
+    pending.push({ s, t }); if (pending.length > 40) pending.splice(0, pending.length - 40);
   }
+  // 連射排程：提前排好約 0.3 秒，畫面卡頓時節奏不亂；放開時取消還沒響的
   function scheduleGuns() {
-    if (!burstOn || !on || !gunBufs.length) { burstT = 0; return; }
-    const gap = 0.38 / Math.max(1, burstN);
+    if (!ctx) return;
+    if (!burstOn || !on || !gunBufs.length) {
+      if (burstT) { for (const p of pending) if (p.t > ctx.currentTime + 0.01) { try { p.s.stop(); } catch (_) {} } pending.length = 0; }
+      burstT = 0; return;
+    }
+    const gap = 0.085 + (4 - Math.min(4, Math.max(1, burstN))) * 0.02;
     if (burstT < ctx.currentTime) burstT = ctx.currentTime + 0.01;
-    while (burstT < ctx.currentTime + 0.12) { burstSide = -burstSide; playShot(burstT, 0.95, burstSide * (0.15 + Math.random() * 0.2), 9000); burstT += gap * (0.92 + Math.random() * 0.16); }
+    while (burstT < ctx.currentTime + 0.3) {
+      const ag = aliveGuns(); const tw = ag[burstSide = (burstSide + 1) % Math.max(1, ag.length)]; let pan = 0;
+      if (tw) { const v = tw.center.clone().applyMatrix4(camera.matrixWorldInverse); pan = THREE.MathUtils.clamp(v.x / (Math.abs(v.z) + 12), -0.6, 0.6); }
+      playShot(burstT, 1.0, pan, 11000, 0.55); burstT += gap * (0.94 + Math.random() * 0.12);
+    }
   }
   const ROOTS = [55, 43.65, 49, 41.2]; // A、F、G、E
   const BASS = [1, 1, 2, 1, 1, 2, 1, 1.5];
@@ -917,7 +949,7 @@ const SFX = (() => {
     gun(p) {
       if (!ok() || !gunBufs.length) return; const now = ctx.currentTime; if (now - gunT < 0.05) return; gunT = now;
       const s = spatial(p, 45); if (s.g < 0.03) return;
-      playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g);
+      playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g, 0.35);
     },
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
     _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, state: ctx && ctx.state }; },
@@ -948,6 +980,7 @@ const SFX = (() => {
     update(dt) {
       if (!ctx) return;
       if (MODE !== 'defend') { musState = 0; burstOn = false; }
+      scheduleGuns();
       const fly = MODE === 'student' && F.flying;
       const dn = MODE === 'student' && S.down;
       // 自己的馬達：越快音調越高；被微波打中時馬達聲往下掉
