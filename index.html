@@ -209,6 +209,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
       <button class="btn" id="practice1">先單人練習飛行</button>
+      <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
 
@@ -222,6 +223,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
       <div class="row2"><button class="btn" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
+      <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
 
@@ -266,6 +268,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <table class="board" id="tBoard"></table>
     <button class="btn go" id="tRank">公布總排名</button>
     <button class="btn warn" id="tReset">開新場次（清空所有人）</button>
+    <button class="btn backrole" hidden>回到選擇身分</button>
   </aside>
   <button class="btn fold" id="tShow" hidden>打開面板</button>
   <section class="scr tres" id="tRes" hidden><div class="card" id="tResCard"></div></section>
@@ -302,7 +305,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.3（十一項優化）';
+const VERSION = '2.4（可回到選擇身分）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -2366,7 +2369,11 @@ setView('menu');
 $('load').hidden = true;
 if (ROLE === 'teacher') teacherInit();
 else if (ROLE === 'student') studentInit();
-else { show('scrRole'); $('roleT').onclick = () => teacherInit(); $('roleS').onclick = () => studentInit(); }
+else {
+  // 預覽頁（同一台電腦練習）：選完身分後還可以回到選擇畫面
+  show('scrRole'); $('roleT').onclick = () => teacherInit(); $('roleS').onclick = () => studentInit();
+  document.querySelectorAll('.backrole').forEach(b => { b.hidden = false; b.onclick = () => location.reload(); });
+}
 requestAnimationFrame(frame);
 // 測試用
 window.__rd = { SFX, NET, TS, G, F, S, ME, DEF, STATIONS, contacts, IN, get META() { return META; }, get PLAYERS() { return PLAYERS; }, get TPLAYERS() { return TPLAYERS; }, get MODE() { return MODE; },
