@@ -82,6 +82,8 @@ table.board th, table.board td { border-bottom: 1px solid var(--line); padding: 
 table.board th { color: var(--muted); font-weight: 700; }
 .fold { position: absolute; left: 12px; top: 12px; pointer-events: auto; }
 #hudT.wp .wbar, #hudT.wp .hp { left: calc(50% + min(430px, 92vw) / 2); }
+.scope { position: absolute; left: 14px; bottom: 100px; width: min(30vh, 260px); height: min(30vh, 260px); border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,0.6); }
+#hudT.wp .scope { left: calc(min(430px, 92vw) + 14px); }
 #view.defend > #c { cursor: none; }
 #tCross { pointer-events: none; }
 .pip { position: absolute; right: 14px; bottom: 120px; width: min(34vw, 560px); aspect-ratio: 16 / 9; border: 3px solid rgba(255,255,255,0.75); border-radius: 8px; pointer-events: auto; cursor: pointer; box-shadow: 0 0 0 2px rgba(0,0,0,0.5); }
@@ -149,6 +151,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <div class="stlist t s" id="tSt"></div>
     <svg class="cross" id="tCross" viewBox="0 0 100 100" aria-hidden="true" style="width:90px;height:90px"><g stroke="#fff" stroke-width="2.2" fill="none" style="filter:drop-shadow(0 0 2px #000)"><circle cx="50" cy="50" r="22"/><path d="M50 10v22M50 68v22M10 50h22M68 50h22"/></g></svg>
     <div id="tTags"></div>
+    <canvas class="scope" id="scope" width="520" height="520"></canvas>
     <div class="t s" style="right:14px;top:150px;text-align:right" id="tAir"></div>
     <div class="pip" id="pip" hidden><div class="pipbar"><b id="pipName"></b><span>點一下換人</span></div><div class="pipst" id="pipSt" hidden></div></div>
     <div class="wbar" id="wbar">
@@ -223,7 +226,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <div class="teams" id="tTeams"></div>
     <div class="btns" id="tGo"></div>
     <div class="row2"><button class="btn warn" id="tStop" disabled>結束本波</button><button class="btn" id="tHide">收起面板</button></div>
-    <button class="btn" id="tSnd">音效：開</button>
+    <div class="row2"><button class="btn" id="tSnd">音效：開</button><button class="btn" id="tMus">背景音樂：開</button></div>
     <div class="row2"><button class="btn" id="tAuto">機槍塔自動射擊：關</button><button class="btn" id="tPip">學生視角小畫面：關</button></div>
     <div class="row2"><button class="btn go" id="tRehearse">演練：電腦無人機</button><button class="btn go" id="tFly" style="--c:var(--t1)">換我飛：電腦防守</button></div>
     <table class="board" id="tBoard"></table>
@@ -780,6 +783,7 @@ function renderMask() {
 const SFX = (() => {
   let ctx = null, master = null, noiseBuf = null, gunT = 0;
   let on = store.get('snd', true);
+  let musOn = store.get('mus', true), musState = 0, mus = null, nextT = 0, step = 0;
   const L = {};
   const clamp = THREE.MathUtils.clamp;
   function init() {
@@ -795,6 +799,40 @@ const SFX = (() => {
     L.buzz = loopOsc(['sawtooth', 'square'], 'lowpass', 1200);
     L.rocket = loopNoise('bandpass', 900, 0.9);
     L.hiss = loopNoise('highpass', 1400, 0.5);
+    // 背景音樂（只在老師電腦播放）：低音脈動、鼓點、和弦長音，最後 10 秒加快節奏
+    mus = ctx.createGain(); mus.gain.value = 0; mus.connect(master);
+    const padF = ctx.createBiquadFilter(); padF.type = 'lowpass'; padF.frequency.value = 700; const padG = ctx.createGain(); padG.gain.value = 0.16; padF.connect(padG); padG.connect(mus);
+    mus.pad = [0, 1, 2].map(i => { const o = ctx.createOscillator(); o.type = i === 2 ? 'sine' : 'triangle'; o.frequency.value = 110; o.detune.value = (i - 1) * 7; o.connect(padF); o.start(); return o; });
+    setInterval(schedule, 50);
+  }
+  const ROOTS = [55, 43.65, 49, 41.2]; // A、F、G、E
+  const BASS = [1, 1, 2, 1, 1, 2, 1, 1.5];
+  function mTone(type, f0, f1, peak, dur, t, flt) {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    if (flt) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = flt; o.connect(f); f.connect(g); } else o.connect(g);
+    g.connect(mus); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function mTick(peak, t) {
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf; const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
+    const g = ctx.createGain(); g.gain.setValueAtTime(peak, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035); s.connect(f); f.connect(g); g.connect(mus); s.start(t, Math.random()); s.stop(t + 0.05);
+  }
+  function schedule() {
+    if (!ctx || !mus) return;
+    set(mus.gain, musOn && on && musState > 0 ? 0.3 : 0, 0.6);
+    if (musState === 0) { nextT = 0; return; }
+    const spb = 60 / (musState === 2 ? 132 : 112) / 2;
+    if (nextT < ctx.currentTime) nextT = ctx.currentTime + 0.05;
+    while (nextT < ctx.currentTime + 0.2) {
+      const t = nextT, s = step, root = ROOTS[Math.floor(s / 16) % 4];
+      if (s % 16 === 0) mus.pad.forEach((o, i) => o.frequency.setTargetAtTime(root * [2, 3, 4][i], t, 0.3));
+      mTone('sawtooth', root * BASS[s % 8], root * BASS[s % 8] * 0.98, s % 4 === 0 ? 0.42 : 0.28, spb * 0.9, t, 320);
+      if (s % 4 === 0) mTone('sine', 95, 38, 0.55, 0.2, t);
+      if (s % 8 === 4) { const n = ctx.createBufferSource(); n.buffer = noiseBuf; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; const g = ctx.createGain(); g.gain.setValueAtTime(0.18, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); n.connect(f); f.connect(g); g.connect(mus); n.start(t, Math.random()); n.stop(t + 0.15); }
+      if (s % 2 === 1) mTick(0.06, t);
+      if (musState === 2) mTick(0.04, t + spb / 2);
+      nextT += spb; step++;
+    }
   }
   addEventListener('pointerdown', init, { capture: true }); addEventListener('keydown', init, { capture: true });
   function loopOsc(types, ft, f) {
@@ -834,6 +872,9 @@ const SFX = (() => {
   const ok = () => ctx && on && ctx.state === 'running';
   return {
     get on() { return on; },
+    get musicOn() { return musOn; },
+    toggleMusic() { musOn = !musOn; store.set('mus', musOn); return musOn; },
+    setMusic(st) { if (st !== musState) { if (musState === 0) step = 0; musState = st; } },
     toggle() { on = !on; store.set('snd', on); if (ctx) set(master.gain, on ? 0.75 : 0, 0.05); return on; },
     // 機槍：短促的爆裂聲加低頻悶響
     gun(p) {
@@ -867,6 +908,7 @@ const SFX = (() => {
     // 每張畫面更新持續的聲音
     update(dt) {
       if (!ctx) return;
+      if (MODE !== 'defend') musState = 0;
       const fly = MODE === 'student' && F.flying;
       const dn = MODE === 'student' && S.down;
       // 自己的馬達：越快音調越高；被微波打中時馬達聲往下掉
@@ -1846,6 +1888,9 @@ function teacherFrame(dt, time) {
   if (TS.phase === 'wave') { TS.guns -= dt; if (TS.guns <= 0) { TS.guns = 0.16; NET.set('guns', GUNS.map(g => [Math.round(g.turret.rotation.y * 100) / 100, Math.round(g.gun.rotation.x * 100) / 100, g.fireT < 0.25 ? 1 : 0])); } }
   $('hudT').classList.toggle('wp', !$('tPanel').hidden);
   pipUpdate(dt);
+  drawScope(dt);
+  const tl = (TS.endsAt - now) / 1000;
+  SFX.setMusic((TS.phase === 'wave' || TS.rehearsal) ? (tl < 10 ? 2 : 1) : TS.phase === 'count' ? 1 : 0);
   teacherHud(now);
 }
 function teacherHud(now) {
@@ -1883,6 +1928,55 @@ function teacherHud(now) {
   }
 }
 /* ---------- 學生視角小畫面：即時顯示某一架無人機看到的畫面 ---------- */
+/* ---------- 圓形雷達畫面：顯示周邊無人機 ---------- */
+const SCOPE = { ang: 0, seen: new Map(), range: 800 };
+function drawScope(dt) {
+  const cv = $('scope'); const g = cv.getContext('2d'); const W = cv.width, cx = W / 2, cy = W / 2, R = W / 2 - 8;
+  g.clearRect(0, 0, W, W);
+  g.save(); g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fillStyle = 'rgba(4,18,10,0.82)'; g.fill(); g.clip();
+  const dead = STATIONS.radar.dead;
+  // 距離圈與十字線
+  g.strokeStyle = 'rgba(90,255,150,0.28)'; g.lineWidth = 2;
+  for (const k of [1 / 3, 2 / 3, 1]) { g.beginPath(); g.arc(cx, cy, R * k, 0, Math.PI * 2); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  g.font = '700 22px "Noto Sans TC", sans-serif'; g.fillStyle = 'rgba(140,255,180,0.7)'; g.textAlign = 'left';
+  g.fillText('北', cx + 6, cy - R + 26); g.fillText(`${Math.round(SCOPE.range / 3)} 公尺`, cx + 6, cy - R / 3 - 6);
+  // 老師目前面對的方向
+  const fx = -Math.sin(D.yaw), fz = -Math.cos(D.yaw); const fa = Math.atan2(fz, fx);
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, fa - 0.62, fa + 0.62); g.closePath(); g.fill();
+  if (dead) {
+    g.restore(); g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ff8a7a'; g.textAlign = 'center'; g.font = '900 34px "Noto Sans TC", sans-serif'; g.fillText('雷達站已被摧毀', cx, cy - 4); g.font = '700 26px "Noto Sans TC", sans-serif'; g.fillText('看不到來襲無人機', cx, cy + 34);
+    return;
+  }
+  // 掃描線（約 2.5 秒轉一圈），掃過的無人機才更新位置
+  const prev = SCOPE.ang; SCOPE.ang = (SCOPE.ang + dt * 2.5) % (Math.PI * 2);
+  const span = ((SCOPE.ang - prev) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  SCOPE.time = (SCOPE.time || 0) + dt; const now = SCOPE.time; let n = 0, low = 0;
+  for (const c of contacts.values()) {
+    if (!c.alive || c.isSelf) continue; const dx = c.pos.x, dz = c.pos.z; const d = Math.hypot(dx, dz); if (d > SCOPE.range) continue;
+    const isLow = c.pos.y - height(c.pos.x, c.pos.z) < 10; if (isLow) low++; else n++;
+    const a = Math.atan2(dz, dx); const rel = ((a - prev) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    if (rel <= span) SCOPE.seen.set(c.id, { x: dx, z: dz, t: now, team: c.team, low: isLow });
+  }
+  for (const [id, b] of SCOPE.seen) {
+    const age = now - b.t; const c = contacts.get(id); if (age > 2.6 || (!c || !c.alive) && age > 0.6) { SCOPE.seen.delete(id); continue; }
+    const a = Math.max(0, 1 - age / 2.6); const sx = cx + b.x / SCOPE.range * R, sy = cy + b.z / SCOPE.range * R;
+    const col = TEAMS[b.team] ? TEAMS[b.team].c : '#8fffb0';
+    g.globalAlpha = b.low ? a * 0.45 : a; g.fillStyle = col; g.strokeStyle = col; g.lineWidth = 3;
+    g.beginPath(); g.arc(sx, sy, b.low ? 8 : 9, 0, Math.PI * 2); b.low ? g.stroke() : g.fill();
+  }
+  g.globalAlpha = 1;
+  const grd = g.createConicGradient ? g.createConicGradient(SCOPE.ang - 0.9, cx, cy) : null;
+  if (grd) { grd.addColorStop(0, 'rgba(90,255,150,0)'); grd.addColorStop(0.143, 'rgba(90,255,150,0.28)'); grd.addColorStop(0.1431, 'rgba(90,255,150,0)'); grd.addColorStop(1, 'rgba(90,255,150,0)'); g.fillStyle = grd; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, SCOPE.ang - 0.9, SCOPE.ang); g.closePath(); g.fill(); }
+  g.strokeStyle = 'rgba(120,255,170,0.9)'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(SCOPE.ang) * R, cy + Math.sin(SCOPE.ang) * R); g.stroke();
+  g.fillStyle = '#d8ffe4'; g.fillRect(cx - 6, cy - 6, 12, 12);
+  g.restore();
+  // 架數
+  g.textAlign = 'center'; g.fillStyle = '#ffffff'; g.font = '900 30px "Noto Sans TC", sans-serif'; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.lineWidth = 6;
+  const t1 = `偵測到 ${n} 架`; g.strokeText(t1, cx, cy + R * 0.62); g.fillText(t1, cx, cy + R * 0.62);
+  if (low) { g.font = '700 22px "Noto Sans TC", sans-serif'; const t2 = `另有低空 ${low} 架（訊號弱）`; g.strokeText(t2, cx, cy + R * 0.62 + 30); g.fillText(t2, cx, cy + R * 0.62 + 30); }
+}
 const PIP = { on: false, id: null, deadT: 0 };
 const pipCam = new THREE.PerspectiveCamera(92, 16 / 9, 0.02, 4000); scene.add(pipCam);
 { const pw = warhead.clone(); pipCam.add(pw); const l = new THREE.PointLight('#fff1dc', 1.6, 1.3, 2); l.position.set(0.12, 0.25, 0.15); pipCam.add(l); }
@@ -1929,6 +2023,8 @@ function pipRender() {
 }
 $('pip').addEventListener('pointerdown', (e) => { e.stopPropagation(); pipNext(); });
 $('tFly').onclick = () => teacherFly();
+$('tMus').onclick = () => { $('tMus').textContent = `背景音樂：${SFX.toggleMusic() ? '開' : '關'}`; };
+$('tMus').textContent = `背景音樂：${SFX.musicOn ? '開' : '關'}`;
 $('tSnd').onclick = () => { $('tSnd').textContent = `音效：${SFX.toggle() ? '開' : '關'}`; };
 $('tSnd').textContent = `音效：${SFX.on ? '開' : '關'}`;
 $('tPip').onclick = () => { PIP.on = !PIP.on; $('tPip').textContent = `學生視角小畫面：${PIP.on ? '開' : '關'}`; };
