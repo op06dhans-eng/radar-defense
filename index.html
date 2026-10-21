@@ -191,7 +191,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <p id="wText"></p>
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
-      <button class="btn" id="fsBtn" hidden>全螢幕</button>
+      <div class="row2"><button class="btn" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
     </div>
   </section>
 
@@ -223,6 +223,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <div class="teams" id="tTeams"></div>
     <div class="btns" id="tGo"></div>
     <div class="row2"><button class="btn warn" id="tStop" disabled>結束本波</button><button class="btn" id="tHide">收起面板</button></div>
+    <button class="btn" id="tSnd">音效：開</button>
     <div class="row2"><button class="btn" id="tAuto">機槍塔自動射擊：關</button><button class="btn" id="tPip">學生視角小畫面：關</button></div>
     <div class="row2"><button class="btn go" id="tRehearse">演練：電腦無人機</button><button class="btn go" id="tFly" style="--c:var(--t1)">換我飛：電腦防守</button></div>
     <table class="board" id="tBoard"></table>
@@ -677,6 +678,7 @@ const fire = new Particles(2500, true);
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const SMOKE_L = [0.62, 0.58, 0.53], SMOKE_D = [0.16, 0.15, 0.14];
 function explosion(p, big = 1, k = 1) {
+  SFX.boom(p, big);
   for (let i = 0; i < 26 * big; i++) { const d = V(R() - 0.5, R() * 0.8 - 0.1, R() - 0.5).normalize().multiplyScalar(4 + R() * 10 * big); fire.spawn(p, d, { life: 0.35 + R() * 0.35, s0: 1.2 * big, s1: 3.2 * big, a: 1, c0: [9 * k, 4.2 * k, 1.2 * k], c1: [3 * k, 0.8 * k, 0.1 * k], drag: 4 }); }
   for (let i = 0; i < 24 * big; i++) { const d = V(R() - 0.5, R() * 0.7, R() - 0.5).normalize().multiplyScalar(2 + R() * 5 * big); smoke.spawn(p, d, { life: 3 + R() * 3, s0: 1.5 * big, s1: 9 * big, a: 0.85, c0: SMOKE_D, c1: [0.35, 0.33, 0.31], drag: 1.6, rise: 1.2 }); }
   for (let i = 0; i < 14 * big; i++) { const d = V(R() - 0.5, R() * 0.9, R() - 0.5).normalize().multiplyScalar(14 + R() * 18); fire.spawn(p, d, { life: 0.5 + R() * 0.5, s0: 0.25, s1: 0.1, a: 1, c0: [10, 6, 2], c1: [4, 1, 0.2], drag: 1.2 }); }
@@ -768,6 +770,123 @@ function renderMask() {
   renderer.setRenderTarget(maskRT); renderer.clear(); renderer.render(scene, camera); renderer.setRenderTarget(null);
   scene.background = bg; scene.fog = fog; scene.overrideMaterial = ov; camera.layers.mask = tm;
 }
+
+/* =========================================================
+   音效：全部用瀏覽器即時合成，不需要下載音檔
+   爆炸聲刻意做成悶響、有淡入，並經過壓縮器限制音量，避免突然嚇到人
+   ========================================================= */
+const SFX = (() => {
+  let ctx = null, master = null, noiseBuf = null, gunT = 0;
+  let on = store.get('snd', true);
+  const L = {};
+  const clamp = THREE.MathUtils.clamp;
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    try { ctx = new AC(); } catch (_) { return; }
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -20; comp.knee.value = 12; comp.ratio.value = 8; comp.attack.value = 0.01; comp.release.value = 0.25;
+    master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
+    L.motor = loopOsc(['sawtooth', 'sawtooth'], 'lowpass', 1600);
+    L.wind = loopNoise('bandpass', 520, 0.7);
+    L.buzz = loopOsc(['sawtooth', 'square'], 'lowpass', 1200);
+    L.rocket = loopNoise('bandpass', 900, 0.9);
+    L.hiss = loopNoise('highpass', 1400, 0.5);
+  }
+  addEventListener('pointerdown', init, { capture: true }); addEventListener('keydown', init, { capture: true });
+  function loopOsc(types, ft, f) {
+    const g = ctx.createGain(); g.gain.value = 0; const flt = ctx.createBiquadFilter(); flt.type = ft; flt.frequency.value = f; flt.connect(g); g.connect(master);
+    const oscs = types.map((t, i) => { const o = ctx.createOscillator(); o.type = t; o.frequency.value = 150 * (1 + i * 0.503); const og = ctx.createGain(); og.gain.value = i ? 0.35 : 0.6; o.connect(og); og.connect(flt); o.start(); return o; });
+    return { g, flt, oscs };
+  }
+  function loopNoise(ft, f, q) {
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const flt = ctx.createBiquadFilter(); flt.type = ft; flt.frequency.value = f; flt.Q.value = q;
+    const g = ctx.createGain(); g.gain.value = 0; src.connect(flt); flt.connect(g); g.connect(master); src.start(); return { g, flt };
+  }
+  function set(param, v, tc = 0.08) { param.setTargetAtTime(v, ctx.currentTime, tc); }
+  // 依距離與左右位置調整音量
+  function spatial(p, ref) {
+    if (!p) return { g: 1, pan: 0 };
+    const d = p.distanceTo(camera.position); const g = 1 / (1 + d / ref);
+    const v = p.clone().applyMatrix4(camera.matrixWorldInverse); const pan = clamp(v.x / (Math.abs(v.z) + 12), -0.8, 0.8);
+    return { g, pan };
+  }
+  function out(gain, pan) {
+    const g = ctx.createGain(); g.gain.value = 0;
+    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan || 0; g.connect(p); p.connect(master); } else g.connect(master);
+    return g;
+  }
+  function env(g, peak, attack, dur) { const t = ctx.currentTime; g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + attack + dur); }
+  function noiseHit(type, f0, f1, q, peak, attack, dur, pan) {
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const flt = ctx.createBiquadFilter(); flt.type = type; flt.Q.value = q; const t = ctx.currentTime;
+    flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + attack + dur);
+    const g = out(peak, pan); env(g, peak, attack, dur); src.connect(flt); flt.connect(g); src.start(t, Math.random() * 1.5); src.stop(t + attack + dur + 0.05);
+  }
+  function tone(type, f0, f1, peak, attack, dur, pan) {
+    const o = ctx.createOscillator(); o.type = type; const t = ctx.currentTime; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + attack + dur);
+    const g = out(peak, pan); env(g, peak, attack, dur); o.connect(g); o.start(t); o.stop(t + attack + dur + 0.05);
+  }
+  const ok = () => ctx && on && ctx.state === 'running';
+  return {
+    get on() { return on; },
+    toggle() { on = !on; store.set('snd', on); if (ctx) set(master.gain, on ? 0.75 : 0, 0.05); return on; },
+    // 機槍：短促的爆裂聲加低頻悶響
+    gun(p) {
+      if (!ok()) return; const now = ctx.currentTime; if (now - gunT < 0.028) return; gunT = now;
+      const s = spatial(p, 30); if (s.g < 0.03) return;
+      noiseHit('bandpass', 2200, 900, 0.9, 0.55 * s.g, 0.002, 0.07, s.pan);
+      tone('sine', 140, 50, 0.45 * s.g, 0.002, 0.08, s.pan);
+    },
+    // 子彈從身邊飛過的咻聲
+    whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
+    // 飛彈發射：低沉的推進聲逐漸升高
+    missile(p) { if (!ok()) return; const s = spatial(p, 70); noiseHit('lowpass', 400, 2600, 0.7, 0.5 * s.g, 0.12, 1.4, s.pan); tone('sawtooth', 70, 140, 0.12 * s.g, 0.1, 1.2, s.pan); },
+    // 攔截網：氣壓發射的砰一聲加風聲
+    net(p) { if (!ok()) return; const s = spatial(p, 50); tone('sine', 120, 45, 0.5 * s.g, 0.005, 0.18, s.pan); noiseHit('bandpass', 900, 400, 1.2, 0.35 * s.g, 0.01, 0.45, s.pan); },
+    // 微波武器：低沉的電流嗡聲往外擴散
+    microwave(p) { if (!ok()) return; const s = spatial(p, 120); tone('sawtooth', 55, 110, 0.18 * Math.max(0.35, s.g), 0.25, 1.8, s.pan); tone('sine', 900, 240, 0.08 * Math.max(0.35, s.g), 0.2, 1.4, s.pan); noiseHit('highpass', 5000, 3000, 0.5, 0.06, 0.2, 1.2, s.pan); },
+    // 爆炸：有淡入的悶響，音量受距離與壓縮器限制
+    boom(p, big = 1) {
+      if (!ok()) return; const s = spatial(p, 70); const pk = Math.min(0.5, 0.42 * big) * s.g; if (pk < 0.01) return;
+      noiseHit('lowpass', 1100, 140, 0.6, pk, 0.035, 1.1 + big * 0.5, s.pan);
+      tone('sine', 62, 28, pk * 0.9, 0.04, 0.9 + big * 0.3, s.pan);
+    },
+    // 自己被擊中
+    hit(type) {
+      if (!ok()) return;
+      if (type === 'gun') { tone('square', 640, 380, 0.16, 0.003, 0.12); tone('square', 930, 600, 0.1, 0.003, 0.1); noiseHit('bandpass', 2500, 800, 1, 0.4, 0.003, 0.18); }
+      else if (type === 'missile') { noiseHit('lowpass', 900, 120, 0.6, 0.45, 0.04, 1.3); tone('sine', 55, 25, 0.4, 0.05, 1.0); }
+      else if (type === 'mw') { tone('square', 1200, 90, 0.12, 0.01, 0.6); noiseHit('highpass', 6000, 2000, 0.5, 0.18, 0.01, 0.5); }
+      else if (type === 'net') { tone('sine', 100, 40, 0.35, 0.005, 0.2); noiseHit('bandpass', 700, 300, 1.5, 0.25, 0.01, 0.35); }
+    },
+    // 每張畫面更新持續的聲音
+    update(dt) {
+      if (!ctx) return;
+      const fly = MODE === 'student' && F.flying;
+      const dn = MODE === 'student' && S.down;
+      // 自己的馬達：越快音調越高；被微波打中時馬達聲往下掉
+      let mg = 0, mf = 150;
+      if (fly) { mg = 0.12 + (F.boost ? 0.05 : 0); mf = 120 + F.speed * 2.1; }
+      else if (dn && (dn.type === 'net' || dn.type === 'gun') && dn.ground < 0) { mg = dn.type === 'net' ? 0.08 : 0.06; mf = dn.type === 'net' ? 260 + Math.sin(dn.t * 30) * 40 : 180; }
+      set(L.motor.g.gain, mg); L.motor.oscs.forEach((o, i) => set(o.frequency, mf * (1 + i * 0.503) + (F.boost ? Math.sin(performance.now() / 40) * 6 : 0), 0.1));
+      set(L.wind.g.gain, fly ? clamp(F.speed / 95, 0, 1) * 0.16 : (dn && dn.ground < 0 ? 0.08 : 0)); set(L.wind.flt.frequency, 350 + (fly ? F.speed * 6 : 300));
+      // 老師聽到的無人機群嗡嗡聲
+      let bz = 0;
+      if (MODE === 'defend') for (const c of contacts.values()) if (c.alive) bz += 1 / (1 + c.pos.distanceTo(camera.position) / 45);
+      if (MODE === 'student') for (const c of contacts.values()) if (c.alive && !c.isSelf) bz += 1 / (1 + c.pos.distanceTo(camera.position) / 25);
+      set(L.buzz.g.gain, clamp(bz * 0.09, 0, 0.22), 0.2); set(L.buzz.oscs[0].frequency, 205 + Math.sin(performance.now() / 700) * 8, 0.3); set(L.buzz.oscs[1].frequency, 311, 0.3);
+      // 飛彈火箭聲：最近的一枚
+      let rk = 0; for (const m of missiles) rk = Math.max(rk, 1 / (1 + m.body.position.distanceTo(camera.position) / 45));
+      set(L.rocket.g.gain, rk * 0.45, 0.1);
+      // 無訊號時的雜訊
+      const stat = MODE === 'student' && S.dead > 0 && S.static;
+      set(L.hiss.g.gain, stat ? (S.dead > S.deadMax - 0.6 ? 0.14 : 0.025) : (dn && dn.type === 'gun' ? 0.03 : 0), 0.05);
+    },
+  };
+})();
 
 /* =========================================================
    設備耐久、命中範圍、被摧毀的樣子
@@ -948,7 +1067,7 @@ function fireGun(st, dir) {
   const m = new THREE.Mesh(tracerGeo, tracerMat); m.position.copy(muzzle); if (MODE === 'student') { const gl = new THREE.Sprite(tracerGlow); gl.scale.setScalar(1.1); m.add(gl); }
   const v = dir.clone().add(V((R() - 0.5) * 0.014, (R() - 0.5) * 0.014, (R() - 0.5) * 0.014)).normalize().multiplyScalar(620);
   m.lookAt(muzzle.clone().add(v)); scene.add(m); tracers.push({ m, v, life: 0 });
-  fire.spawn(muzzle.clone().addScaledVector(dir, 1.6), V(), { life: 0.06, s0: 1.3, s1: 1.7, a: 1, c0: [10, 6, 2] });
+  fire.spawn(muzzle.clone().addScaledVector(dir, 1.6), V(), { life: 0.06, s0: 1.3, s1: 1.7, a: 1, c0: [10, 6, 2] }); SFX.gun(muzzle);
   if (R() < 0.4) smoke.spawn(muzzle.clone().addScaledVector(dir, 1.8), dir.clone().multiplyScalar(4), { life: 1.2, s0: 0.4, s1: 1.6, a: 0.22, c0: SMOKE_L, drag: 2, rise: 0.6 });
 }
 function gunAt(st, p, dt, fast) {
@@ -970,7 +1089,7 @@ function fireMissile(target, force) {
   const body = new THREE.Group(); const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 2.2, 10), missileMat); cyl.rotation.x = Math.PI / 2; body.add(cyl);
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.4, 10), missileMat); nose.rotation.x = Math.PI / 2; nose.position.z = 1.3; body.add(nose);
   const plume = new THREE.Sprite(plumeMat); plume.scale.setScalar(4); plume.position.z = -1.3; body.add(plume);
-  body.position.copy(p).addScaledVector(fwd, 2); scene.add(body);
+  body.position.copy(p).addScaledVector(fwd, 2); scene.add(body); SFX.missile(body.position);
   for (let i = 0; i < 12; i++) smoke.spawn(body.position, V(R() - 0.5, R() * 0.5, R() - 0.5).multiplyScalar(6), { life: 1.8 + R() * 1.2, s0: 1.2, s1: 4.5, a: 0.5, c0: SMOKE_L, drag: 2.2, rise: 0.8 });
   missiles.push({ body, plume, vel: fwd.clone().add(V(0, 0.8, 0)).normalize().multiplyScalar(30), target, t: 0, miss: false });
   if (DEF.onFx) DEF.onFx('m', target);
@@ -997,7 +1116,7 @@ function fireNet(target, force) {
   const v = tp.sub(p).normalize().multiplyScalar(70);
   nets.push({ g, v, t: 0, target, caught: null }); target.netting = true;
   for (let i = 0; i < 10; i++) smoke.spawn(p, v.clone().multiplyScalar(0.05).add(V(R() - 0.5, R(), R() - 0.5).multiplyScalar(3)), { life: 1.6, s0: 0.8, s1: 3.5, a: 0.45, c0: SMOKE_L, drag: 2.5 });
-  fire.spawn(p, V(), { life: 0.08, s0: 1.4, s1: 1.8, a: 1, c0: [8, 5, 2] });
+  fire.spawn(p, V(), { life: 0.08, s0: 1.4, s1: 1.8, a: 1, c0: [8, 5, 2] }); SFX.net(p);
   if (DEF.onFx) DEF.onFx('n', target);
   return true;
 }
@@ -1006,7 +1125,7 @@ function fireJam(force) {
   const st = STATIONS.mw; if (st.dead) return false;
   if (!force) { if (DEF.W.cd[2] > 0) return false; DEF.W.cd[2] = MW_CD; }
   const ring = new THREE.Mesh(waveGeo, new THREE.ShaderMaterial({ uniforms: { op: { value: 0.8 } }, vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }', fragmentShader: 'uniform float op; varying float vY; void main(){ float a = op * smoothstep(0.0, 0.25, vY) * (1.0 - vY); gl_FragColor = vec4(vec3(0.9, 1.2, 2.6) * a, a); }', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  ring.position.set(st.center.x, 0, st.center.z); scene.add(ring); jamFx.push({ ring, t: 0 });
+  ring.position.set(st.center.x, 0, st.center.z); scene.add(ring); jamFx.push({ ring, t: 0 }); SFX.microwave(st.center);
   if (DEF.auth) for (const c of contacts.values()) if (c.alive) { const d = Math.hypot(c.pos.x - st.center.x, c.pos.z - st.center.z); if (d < MW_RANGE) c.jamT = 0.02 + d / 160; }
   if (DEF.onFx) DEF.onFx('w');
   return true;
@@ -1149,7 +1268,7 @@ function show(id) { for (const s of ['scrRole', 'scrJoin', 'scrWait', 'scrCount'
 function alertMsg(t) { const a = $('sAlert'); if (!t) { a.hidden = true; return; } a.textContent = t; a.hidden = false; }
 function hitFlash(a, blue) { S.hitA = a; $('hitfx').classList.toggle('blue', !!blue); }
 let nearT = 0;
-function nearMiss() { if (nearT > 0) return; nearT = 0.25; S.shake = Math.max(S.shake, 0.25); }
+function nearMiss() { if (nearT > 0) return; nearT = 0.25; SFX.whizz(); S.shake = Math.max(S.shake, 0.25); }
 
 /* ---------- 選隊 ---------- */
 function teamCounts() { const n = [0, 0, 0, 0]; for (const k in PLAYERS) { const t = PLAYERS[k] && PLAYERS[k].team; if (t >= 0 && t < 4) n[t]++; } return n; }
@@ -1200,7 +1319,7 @@ function waitScreen() {
   if ((META.phase === 'count' || META.phase === 'wave') && !myTurn()) { title = `現在是${META.team === ALL ? '全班' : TEAMS[META.team].name}上場`; text = '看投影幕，等一下就輪到你們。'; }
   if (G.mode === 'done') { title = `你的 ${SORTIES} 架都出擊完了`; text = '看投影幕，等這一波結束。'; }
   $('wTitle').textContent = title; $('wText').textContent = text;
-  $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`;
+  $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; $('sndBtn').textContent = `音效：${SFX.on ? '開' : '關'}`;
   $('fsBtn').hidden = !(document.documentElement.requestFullscreen && !document.fullscreenElement);
   setView('menu'); show('scrWait');
 }
@@ -1234,7 +1353,9 @@ function endWave() {
 function abortWave() { endWave(); }
 function spawnPoint() {
   const a = -Math.PI / 2 + (R() - 0.5) * 1.6, r = 680 + R() * 120;
-  const p = V(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = height(p.x, p.z) + 8 + R() * 6; return p;
+  const p = V(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = height(p.x, p.z) + 8 + R() * 6;
+  for (const b of BUSHES) if (Math.hypot(b.x - p.x, b.z - p.z) < b.r + 30) p.y = Math.max(p.y, b.top + 4); // 不要生在樹叢裡
+  return p;
 }
 function launchSortie() {
   G.used++; F.sortie = (G.mode === 'practice' ? 900 : G.wave * 10) + G.used;
@@ -1305,6 +1426,7 @@ function playerDown(type) {
   if (S.down) return;
   if (SELF) SELF.alive = false; F.flying = false;
   const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+  SFX.hit(type);
   S.ending = type; S.down = { type, t: 0, vel: F.vel.clone(), yaw: e.y, pitch: e.x, roll: e.z, ground: -1, chute: false, done: false, shake: 0 };
   if (type === 'gun') { hitFlash(0.4); S.down.shake = 0.5; alertMsg('機身中彈'); }
   else if (type === 'missile') { hitFlash(0.3); S.down.shake = 1; }
@@ -1493,6 +1615,7 @@ function showResult() {
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   $('practice1').onclick = startPractice; $('practice2').onclick = startPractice;
   $('qBtn').onclick = () => { QUALITY = QUALITY === 'high' ? 'low' : 'high'; store.set('q', QUALITY); applyQuality(); $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; };
+  $('sndBtn').onclick = () => { $('sndBtn').textContent = `音效：${SFX.toggle() ? '開' : '關'}`; };
   $('fsBtn').onclick = () => { document.documentElement.requestFullscreen().then(() => { try { screen.orientation.lock('landscape'); } catch (_) {} }).catch(() => {}); $('fsBtn').hidden = true; };
   $('nGo').onclick = () => { G.nextT = 0; show(null); launchSortie(); };
 }
@@ -1802,6 +1925,8 @@ function pipRender() {
 }
 $('pip').addEventListener('pointerdown', (e) => { e.stopPropagation(); pipNext(); });
 $('tFly').onclick = () => teacherFly();
+$('tSnd').onclick = () => { $('tSnd').textContent = `音效：${SFX.toggle() ? '開' : '關'}`; };
+$('tSnd').textContent = `音效：${SFX.on ? '開' : '關'}`;
 $('tPip').onclick = () => { PIP.on = !PIP.on; $('tPip').textContent = `學生視角小畫面：${PIP.on ? '開' : '關'}`; };
 // 滑鼠：游標瞄準、按住左鍵機槍射擊；按住右鍵拖曳或方向鍵轉向；空白鍵發射微波
 {
@@ -1888,6 +2013,7 @@ function frame() {
   // 畫面每秒張數少時，拆成多個小步驟計算，遊戲速度維持真實時間
   const raw = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime; const n = Math.max(1, Math.ceil(raw / 0.034)); const dt = raw / n;
   for (let i = 0; i < n; i++) simulate(dt, time);
+  SFX.update(raw);
   // 電腦跑不動時（每秒少於 24 張）自動改用省電畫質
   PERF.t += raw; PERF.n++; if (PERF.t > 2) { const fps = PERF.n / PERF.t; PERF.low = fps < 24 ? PERF.low + 1 : 0; PERF.t = 0; PERF.n = 0; if (PERF.low >= 2 && QUALITY === 'high' && MODE !== 'menu') { QUALITY = 'low'; applyQuality(); PERF.low = 0; } }
   if (MODE === 'menu' && MOBILE && (menuSkip ^= 1)) return; // 等待畫面省電
