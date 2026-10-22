@@ -328,7 +328,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.14（Y軸反轉開關）';
+const VERSION = '2.15（手機音效修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -845,21 +845,26 @@ function renderMask() {
    ========================================================= */
 const SFX = (() => {
   let ctx = null, master = null, noiseBuf = null, gunT = 0;
-  let on = store.get('snd', !(IS_PLAY || MOBILE)); // 學生手機預設靜音，避免全班一起響
+  let on = store.get('snd2', true); // 學生手機也預設開聲音（老師要求）；可在等待畫面關掉
   let gunBufs = [], burstOn = false, burstN = 4, burstT = 0, burstSide = 0;
   let musOn = store.get('mus', true), musState = 0, mus = null, nextT = 0, step = 0;
   const L = {};
   const clamp = THREE.MathUtils.clamp;
   function init() {
-    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    if (ctx) { if (ctx.state !== 'running') ctx.resume().catch(() => {}); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    // iPhone：讓網頁聲音在「靜音模式」（側邊靜音鍵）下也能播放（iOS 16.4 以後支援）
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (_) {}
     try { ctx = new AC(); } catch (_) { return; }
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    // iPhone 舊版的解鎖方式：播一段極短的無聲音訊
+    try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (_) {}
     const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -20; comp.knee.value = 12; comp.ratio.value = 8; comp.attack.value = 0.01; comp.release.value = 0.25;
     master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     gunBufs = [0, 1, 2, 3, 4].map(makeGunShot);
     // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
-    L.motor = loopOsc(['sawtooth', 'sawtooth'], 'lowpass', 1600);
+    L.motor = loopOsc(['sawtooth', 'sawtooth', 'triangle'], 'lowpass', MOBILE ? 3200 : 1800); // 螺旋槳：手機喇叭低音弱，保留較多高頻的嗡鳴
     L.wind = loopNoise('bandpass', 520, 0.7);
     L.buzz = loopOsc(['sawtooth', 'square'], 'lowpass', 1200);
     L.rocket = loopNoise('bandpass', 900, 0.9);
@@ -974,7 +979,10 @@ const SFX = (() => {
       nextT += spb; step++;
     }
   }
-  addEventListener('pointerdown', init, { capture: true }); addEventListener('keydown', init, { capture: true });
+  // 手機上，瀏覽器只在「手指離開螢幕」（點一下）時才允許開始播放聲音，所以多聽 pointerup、touchend、click
+  for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) addEventListener(ev, init, { capture: true, passive: true });
+  // 切到別的 App 再回來時，聲音會被暫停；回來後下一次觸碰就恢復
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); });
   function loopOsc(types, ft, f) {
     const g = ctx.createGain(); g.gain.value = 0; const flt = ctx.createBiquadFilter(); flt.type = ft; flt.frequency.value = f; flt.connect(g); g.connect(master);
     const oscs = types.map((t, i) => { const o = ctx.createOscillator(); o.type = t; o.frequency.value = 150 * (1 + i * 0.503); const og = ctx.createGain(); og.gain.value = i ? 0.35 : 0.6; o.connect(og); og.connect(flt); o.start(); return o; });
@@ -1015,7 +1023,7 @@ const SFX = (() => {
     get musicOn() { return musOn; },
     toggleMusic() { musOn = !musOn; store.set('mus', musOn); return musOn; },
     setMusic(st) { if (st !== musState) { if (musState === 0) step = 0; musState = st; } },
-    toggle() { on = !on; store.set('snd', on); if (ctx) set(master.gain, on ? 0.75 : 0, 0.05); return on; },
+    toggle() { on = !on; store.set('snd2', on); init(); if (ctx) set(master.gain, on ? 0.75 : 0, 0.05); return on; },
     // 機槍：短促的爆裂聲加低頻悶響
     // 單發機槍聲（遠處的機槍塔；越遠越悶）
     gun(p) {
@@ -1062,7 +1070,7 @@ const SFX = (() => {
       const dn = MODE === 'student' && S.down;
       // 自己的馬達：越快音調越高；被微波打中時馬達聲往下掉
       let mg = 0, mf = 150;
-      if (fly) { mg = 0.12 + (F.boost ? 0.05 : 0); mf = 120 + F.speed * 2.1; }
+      if (fly) { mg = (0.12 + (F.boost ? 0.05 : 0)) * (MOBILE ? 1.5 : 1); mf = 120 + F.speed * 2.1; }
       else if (dn && (dn.type === 'net' || dn.type === 'gun') && dn.ground < 0) { mg = dn.type === 'net' ? 0.08 : 0.06; mf = dn.type === 'net' ? 260 + Math.sin(dn.t * 30) * 40 : 180; }
       set(L.motor.g.gain, mg); L.motor.oscs.forEach((o, i) => set(o.frequency, mf * (1 + i * 0.503) + (F.boost ? Math.sin(performance.now() / 40) * 6 : 0), 0.1));
       set(L.wind.g.gain, fly ? clamp(F.speed / 95, 0, 1) * 0.16 : (dn && dn.ground < 0 ? 0.08 : 0)); set(L.wind.flt.frequency, 350 + (fly ? F.speed * 6 : 300));
