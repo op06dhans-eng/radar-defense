@@ -17,7 +17,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--sans); overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+html, body { margin: 0; height: 100%; position: fixed; inset: 0; width: 100%; background: var(--bg); color: var(--ink); font-family: var(--sans); overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 button { font-family: var(--sans); cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
@@ -320,7 +320,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.10（iPhone 畫面閃爍修正）';
+const VERSION = '2.11（iPhone 拖曳時網頁晃動修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -2572,6 +2572,18 @@ function resize() {
 }
 function redrawSoon() { if (!RENDER_OK) return; queueMicrotask(() => { try { if (MODE === 'student') renderMask(); composer.render(); } catch (_) {} }); }
 new ResizeObserver(resize).observe(view);
+// iPhone Safari 不完全遵守「禁止捲動」的設定：手指在搖桿上拖曳時，整個網頁會被拖著跑、回彈，
+// 工具列也會跳出來（看起來就是整個畫面跟著晃、一閃一閃）。這裡直接擋掉所有拖曳捲動，
+// 只有真的可以上下捲動的清單（說明卡、老師面板）才放行。
+function canScroll(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    if (n.scrollHeight > n.clientHeight + 2) { const oy = getComputedStyle(n).overflowY; if (oy === 'auto' || oy === 'scroll') return true; }
+  }
+  return false;
+}
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 || !canScroll(e.target)) e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 // 手機記憶體不足時瀏覽器可能收回繪圖資源：顯示提示，資源恢復後重新載入
 $('c').addEventListener('webglcontextlost', (e) => { e.preventDefault(); $('load').textContent = '畫面重新載入中…'; $('load').hidden = false; });
 $('c').addEventListener('webglcontextrestored', () => location.reload());
