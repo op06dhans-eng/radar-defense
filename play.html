@@ -75,12 +75,12 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .btn { min-height: 48px; border-radius: 12px; border: 2px solid var(--line); background: #1b2124; color: #fff; font-size: 18px; font-weight: 900; padding: 6px 12px; }
 .sndS { position: absolute; pointer-events: auto; touch-action: manipulation; font-size: calc(var(--fs) * 0.62); font-weight: 900; color: #fff; background: rgba(0,0,0,0.45); border: 2px solid rgba(255,255,255,0.5); border-radius: 10px; padding: 6px 12px; font-family: var(--sans); }
 .sndS.off { border-color: #ff7a6a; color: #ffb3a8; }
-.btn.invBtn { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; }
-.invBtn > span { text-align: left; font-size: 20px; }
-.invBtn .sw { position: relative; width: 92px; height: 38px; border-radius: 19px; background: #3a4246; flex: none; font-size: 17px; font-weight: 900; color: #cfd6d3; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; transition: background 0.15s; }
-.invBtn .sw::before { content: ''; position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
-.invBtn.on .sw { background: var(--ok); color: #062; justify-content: flex-start; }
-.invBtn.on .sw::before { transform: translateX(54px); }
+.btn.swRow { display: flex; width: 100%; min-height: 56px; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; }
+.swRow > span { text-align: left; font-size: 20px; white-space: nowrap; min-width: 0; }
+.swRow .sw { position: relative; width: 92px; height: 38px; border-radius: 19px; background: #3a4246; flex: none; font-size: 17px; font-weight: 900; color: #cfd6d3; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; transition: background 0.15s; }
+.swRow .sw::before { content: ''; position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.swRow.on .sw { background: var(--ok); color: #062; justify-content: flex-start; }
+.swRow.on .sw::before { transform: translateX(54px); }
 .btn.go { border-color: var(--c, var(--hot)); background: color-mix(in srgb, var(--c, var(--hot)) 25%, #111); }
 .btn.warn { border-color: #a33; background: #3a1512; }
 .btn:disabled { opacity: 0.4; cursor: default; }
@@ -231,7 +231,8 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
       <button class="btn" id="practice1">先單人練習飛行</button>
-      <div class="row2"><button class="btn invBtn"></button><button class="btn sndAny"></button></div>
+      <button class="btn swRow invBtn"></button>
+      <button class="btn swRow sndAny"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
@@ -245,8 +246,9 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="livebox" id="wLive" hidden></div>
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
-      <div class="row2"><button class="btn sndAny" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
-      <button class="btn invBtn"></button>
+      <button class="btn" id="fsBtn" hidden>全螢幕</button>
+      <button class="btn swRow invBtn"></button>
+      <button class="btn swRow sndAny" id="sndBtn"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
@@ -331,7 +333,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.16（飛行中音效開關）';
+const VERSION = '2.17（開關排版修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1836,10 +1838,16 @@ function showResult() {
   $('resCard').innerHTML = html; show('scrRes'); $('rPractice').onclick = startPractice;
 }
 
-function renderSnd() { document.querySelectorAll('.sndAny').forEach(b => { b.textContent = SFX.on ? '音效：開' : '音效：關'; b.classList.toggle('off', !SFX.on); }); }
+function swHtml(name, sub, on) { return `<span>${name}<small style="display:block;font-size:14px;color:#aab5b0;font-weight:700">${sub}</small></span><b class="sw">${on ? '開' : '關'}</b>`; }
+function renderSnd() {
+  document.querySelectorAll('.sndAny').forEach(b => {
+    if (b.classList.contains('swRow')) { b.innerHTML = swHtml('音效', '螺旋槳、爆炸、機砲聲', SFX.on); b.classList.toggle('on', SFX.on); }
+    else { b.textContent = SFX.on ? '音效：開' : '音效：關'; b.classList.toggle('off', !SFX.on); }
+  });
+}
 /* ---------- 上下操控反轉（每位同學自己選，記在自己的手機） ---------- */
 let INVY = store.get('invy', false);
-function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.innerHTML = `<span>Y軸反轉<small style="display:block;font-size:14px;color:#aab5b0;font-weight:700">${INVY ? '往上推＝俯衝' : '往上推＝抬頭'}</small></span><b class="sw">${INVY ? '開' : '關'}</b>`; b.classList.toggle('on', INVY); }); }
+function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.innerHTML = swHtml('Y軸反轉', INVY ? '往上推＝俯衝' : '往上推＝抬頭', INVY); b.classList.toggle('on', INVY); }); }
 document.querySelectorAll('.invBtn').forEach(b => b.addEventListener('click', () => { INVY = !INVY; store.set('invy', INVY); renderInv(); }));
 renderInv();
 /* ---------- 觸控推桿與按鍵 ---------- */
