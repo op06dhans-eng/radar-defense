@@ -284,6 +284,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <button class="btn backrole" hidden>回到選擇身分</button>
   </aside>
   <button class="btn fold" id="tShow" hidden>打開面板</button>
+  <section class="scr" id="scrPhone" hidden><div class="card"><h1>這是老師畫面</h1><p>老師畫面要用電腦開，接上投影機，用滑鼠操作。手機螢幕太小，看不到完整的防守畫面。</p><p>學生請掃投影幕上的 QR Code，或按下面的按鈕直接進入遊戲。</p><button class="btn go" id="phStu" style="--c:var(--t1)">我是學生：進入遊戲</button><button class="btn" id="phTea">我是老師，仍要在手機上開</button></div></section>
   <section class="scr tres" id="tRes" hidden><div class="card" id="tResCard"></div></section>
   <div class="replay" id="rpBox" hidden><div class="rpTag">● 重播</div><div class="rpTop" id="rpTop"><b id="rpTitle"></b><span id="rpWhy"></span></div><div class="rpInfo" id="rpInfo"></div><button class="btn" id="rpSkip">跳過重播</button></div>
   <div class="qrbig" id="qrBig" hidden><canvas id="qr2" width="400" height="400"></canvas><b>掃描加入　雷達站攻防</b></div>
@@ -319,7 +320,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.8（精彩重播、個人榜）';
+const VERSION = '2.9（手機開老師網址時提醒）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -2619,7 +2620,13 @@ function frame() {
 applyQuality();
 setView('menu');
 $('load').hidden = true;
-if (ROLE === 'teacher') teacherInit();
+if (ROLE === 'teacher' && MOBILE && !Q.has('teacher')) {
+  // 手機打開老師網址：提醒老師畫面要用電腦開，學生可以直接改進遊戲
+  $('scrPhone').hidden = false;
+  $('phStu').onclick = () => { location.href = studentURL(); };
+  $('phTea').onclick = () => { $('scrPhone').hidden = true; teacherInit(); };
+}
+else if (ROLE === 'teacher') teacherInit();
 else if (ROLE === 'student') studentInit();
 else {
   // 預覽頁（同一台電腦練習）：選完身分後還可以回到選擇畫面
