@@ -107,6 +107,11 @@ table.board th { color: var(--muted); font-weight: 700; }
 /* 第一次起飛提示、等待中即時戰況、難度設定 */
 .tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: min(58%, 560px); background: rgba(0,0,0,0.62); border: 2px solid rgba(255,255,255,0.35); border-radius: 10px; padding: 6px 12px; font-size: calc(var(--fs) * 0.72); line-height: 1.55; text-align: center; }
 .livebox { background: rgba(255,177,90,0.12); border: 2px solid rgba(255,177,90,0.5); border-radius: 12px; padding: 10px 12px; font-size: clamp(16px, 2.8vmin, 21px); font-weight: 900; line-height: 1.6; }
+.ptRow { display: flex; align-items: center; gap: 8px; border: 2px solid var(--line); border-radius: 12px; padding: 6px 10px; }
+.ptRow > span { flex: 1; font-size: 18px; font-weight: 900; white-space: nowrap; }
+.ptRow small { display: block; font-size: 13px; color: #aab5b0; font-weight: 700; }
+.ptRow button { min-width: 64px; min-height: 42px; border-radius: 8px; border: 2px solid var(--line); background: #1b2124; color: #fff; font-size: 16px; font-weight: 900; touch-action: manipulation; font-family: var(--sans); }
+.ptRow button.on { border-color: var(--hot); background: rgba(255,150,60,0.3); }
 .cfg { display: flex; flex-direction: column; gap: 6px; border: 2px solid var(--line); border-radius: 12px; padding: 8px 10px; }
 .cfg > b { font-size: 17px; }
 .cfg div { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; }
@@ -231,6 +236,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
       <button class="btn" id="practice1">先單人練習飛行</button>
+      <div class="ptRow"><span>練習時間<small>飛機不限架數</small></span><button data-pt="60">1 分鐘</button><button data-pt="90">1 分半</button><button data-pt="120">2 分鐘</button></div>
       <button class="btn swRow invBtn"></button>
       <button class="btn swRow sndAny"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
@@ -246,6 +252,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="livebox" id="wLive" hidden></div>
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
+      <div class="ptRow"><span>練習時間<small>飛機不限架數</small></span><button data-pt="60">1 分鐘</button><button data-pt="90">1 分半</button><button data-pt="120">2 分鐘</button></div>
       <button class="btn" id="fsBtn" hidden>全螢幕</button>
       <button class="btn swRow invBtn"></button>
       <button class="btn swRow sndAny" id="sndBtn"></button>
@@ -333,7 +340,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.18（單人練習機砲自動射擊）';
+const VERSION = '2.19（金屬撞擊聲、練習命中率調低、練習時間選擇）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1018,6 +1025,20 @@ const SFX = (() => {
     flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + attack + dur);
     const g = out(peak, pan); env(g, peak, attack, dur); src.connect(flt); flt.connect(g); src.start(t, Math.random() * 1.5); src.stop(t + attack + dur + 0.05);
   }
+  // 子彈打在金屬機殼上的「鏘」：幾個不成倍數的高頻泛音快速衰減，加上敲擊瞬間的雜訊和機身的悶響
+  function metalAt(t, peak, pan, f) {
+    const g = out(peak, pan); g.gain.setValueAtTime(peak, t);
+    [[1, 0.16, 0.5], [1.58, 0.11, 0.35], [2.37, 0.08, 0.28], [3.41, 0.06, 0.2], [4.62, 0.04, 0.14]].forEach(([r, d, a]) => {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * r * (0.99 + Math.random() * 0.02);
+      const og = ctx.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.linearRampToValueAtTime(a, t + 0.0015); og.gain.exponentialRampToValueAtTime(0.0001, t + d * 1.6);
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + d * 1.6 + 0.05);
+    });
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; const flt = ctx.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = 3800; flt.Q.value = 0.8;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(0.9, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.03); src.connect(flt); flt.connect(ng); ng.connect(g); src.start(t, Math.random()); src.stop(t + 0.05);
+    const b = ctx.createOscillator(); b.type = 'triangle'; b.frequency.setValueAtTime(280, t); b.frequency.exponentialRampToValueAtTime(90, t + 0.07);
+    const bg = ctx.createGain(); bg.gain.setValueAtTime(0.55, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.09); b.connect(bg); bg.connect(g); b.start(t); b.stop(t + 0.12);
+  }
+  let pingT = 0;
   function tone(type, f0, f1, peak, attack, dur, pan) {
     const o = ctx.createOscillator(); o.type = type; const t = ctx.currentTime; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + attack + dur);
     const g = out(peak, pan); env(g, peak, attack, dur); o.connect(g); o.start(t); o.stop(t + attack + dur + 0.05);
@@ -1040,6 +1061,12 @@ const SFX = (() => {
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
     _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
     gunBurst(firing, n) { burstOn = !!firing && n > 0 && ok(); burstN = n; },
+    // 子彈擦過機身：金屬「鏘」一聲，有時帶跳彈的尖嘯
+    ping() {
+      if (!ok()) return; const now = ctx.currentTime; if (now - pingT < 0.07) return; pingT = now;
+      const pan = (Math.random() - 0.5) * 1.2; metalAt(now, 0.38, pan, 1700 + Math.random() * 1600);
+      if (Math.random() < 0.35) tone('sine', 3400 + Math.random() * 800, 1300, 0.05, 0.01, 0.3, pan);
+    },
     // 子彈從身邊飛過的咻聲
     whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
     // 飛彈發射：低沉的推進聲逐漸升高
@@ -1057,7 +1084,7 @@ const SFX = (() => {
     // 自己被擊中
     hit(type) {
       if (!ok()) return;
-      if (type === 'gun') { tone('square', 640, 380, 0.16, 0.003, 0.12); tone('square', 930, 600, 0.1, 0.003, 0.1); noiseHit('bandpass', 2500, 800, 1, 0.4, 0.003, 0.18); }
+      if (type === 'gun') { const now = ctx.currentTime; [0, 0.045, 0.1, 0.16, 0.24].forEach((d, i) => metalAt(now + d, 0.48 - i * 0.05, (Math.random() - 0.5) * 1.2, 1500 + Math.random() * 1800)); noiseHit('lowpass', 1800, 300, 0.7, 0.3, 0.01, 0.4); tone('square', 520, 160, 0.06, 0.25, 0.5); } // 連續幾發打在機殼上，接著馬達受損的嘎聲
       else if (type === 'missile') { noiseHit('lowpass', 900, 120, 0.6, 0.45, 0.04, 1.3); tone('sine', 55, 25, 0.4, 0.05, 1.0); }
       else if (type === 'mw') { tone('square', 1200, 90, 0.12, 0.01, 0.6); noiseHit('highpass', 6000, 2000, 0.5, 0.18, 0.01, 0.5); }
       else if (type === 'net') { tone('sine', 100, 40, 0.35, 0.005, 0.2); noiseHit('bandpass', 700, 300, 1.5, 0.25, 0.01, 0.35); }
@@ -1343,7 +1370,7 @@ function updateWeapons(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i]; tr.life += dt; const prev = tr.m.position.clone(); tr.m.position.addScaledVector(tr.v, dt);
     if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < (c.isSelf && DEF.selfHit !== undefined ? DEF.selfHit : 0.16)) DEF.kill(c, 'gun'); } }
-    if (MODE === 'student' && SELF && SELF.alive && segDist(prev, tr.m.position, camera.position) < 5) nearMiss();
+    if (MODE === 'student' && SELF && SELF.alive) { const sd = segDist(prev, tr.m.position, camera.position); if (sd < 5) nearMiss(); if (sd < 2.4 && !tr.grazed) { tr.grazed = true; grazeHit(); } } // 擦過機身但沒擊落：金屬撞擊聲
     if (tr.life > 1.4) { scene.remove(tr.m); tracers.splice(i, 1); }
   }
   // 飛彈：先爬升再俯衝，飛行軌跡在天空中看得到
@@ -1480,6 +1507,14 @@ function show(id) { for (const s of ['scrRole', 'scrJoin', 'scrWait', 'scrCount'
 function alertMsg(t) { const a = $('sAlert'); if (!t) { a.hidden = true; return; } a.textContent = t; a.hidden = false; }
 function hitFlash(a, blue) { S.hitA = a; $('hitfx').classList.toggle('blue', !!blue); }
 let nearT = 0;
+// 子彈擦過機身（沒有被擊落）：金屬「鏘」、畫面一震、機鼻前冒出幾點火花
+let grazeT = 0;
+function grazeHit() {
+  const now = performance.now(); if (now - grazeT < 90) return; grazeT = now;
+  SFX.ping(); S.shake = Math.max(S.shake, 0.35);
+  const fwd = camera.getWorldDirection(V()); const p = camera.position.clone().addScaledVector(fwd, 1.6);
+  for (let i = 0; i < 4; i++) fire.spawn(p.clone().add(V((R() - 0.5) * 0.8, (R() - 0.6) * 0.5, (R() - 0.5) * 0.8)), V((R() - 0.5) * 6, R() * 3, (R() - 0.5) * 6), { life: 0.12, s0: 0.07, s1: 0.02, a: 1, c0: [6, 4, 1.6] });
+}
 function nearMiss() { if (nearT > 0) return; nearT = 0.25; SFX.whizz(); S.shake = Math.max(S.shake, 0.25); }
 
 /* ---------- 選隊 ---------- */
@@ -1629,10 +1664,10 @@ function remoteKill(how) {
 }
 function afterSortie() {
   $('endCard').hidden = true; $('nosig').hidden = true; alertMsg(null); netOv.visible = false; fpvPass.uniforms.glitch.value = 0; S.down = null;
-  const left = SORTIES - G.used;
+  const left = G.mode === 'practice' ? Infinity : SORTIES - G.used; // 單人練習：飛機不限架數，只限時間
   const timeLeft = G.mode === 'practice' ? G.endAt - performance.now() / 1000 : ((META.endsAt || 0) - NET.now()) / 1000;
   if ((G.mode === 'wave' && META.phase === 'wave' && myTurn()) || G.mode === 'practice') {
-    if (left > 0 && timeLeft > 4) { $('nTitle').textContent = `第 ${G.used + 1} 架準備起飛`; $('nText').textContent = `還剩 ${left} 架。馬上自動起飛。`; G.nextT = 1.2; setView('menu'); show('scrNext'); return; }
+    if (left > 0 && timeLeft > 4) { $('nTitle').textContent = `第 ${G.used + 1} 架準備起飛`; $('nText').textContent = G.mode === 'practice' ? `練習還剩 ${Math.ceil(timeLeft)} 秒，飛機不限架數。馬上自動起飛。` : `還剩 ${left} 架。馬上自動起飛。`; G.nextT = 1.2; setView('menu'); show('scrNext'); return; }
     if (G.mode === 'practice') { stopPractice(); return; }
     G.mode = 'done'; setView('menu'); waitScreen(); return;
   }
@@ -1642,7 +1677,7 @@ function afterSortie() {
 /* ---------- 單人練習（電腦防守） ---------- */
 function startPractice() {
   if (myTurn()) return;
-  G.mode = 'practice'; G.used = 0; G.results = []; G.endAt = performance.now() / 1000 + WAVE_SEC;
+  G.mode = 'practice'; G.used = 0; G.results = []; G.endAt = performance.now() / 1000 + PTIME;
   resetLocalFx(); resetDefense(); DEF.auth = true; launchSortie();
 }
 function stopPractice(silent) {
@@ -1779,7 +1814,7 @@ function studentFrame(dt, time) {
   $('sSpd').textContent = `${Math.round(F.speed * 3.6)} km/h`;
   const tl = G.mode === 'practice' ? G.endAt - performance.now() / 1000 : ((META.endsAt || 0) - NET.now()) / 1000;
   $('sTime').textContent = G.mode !== 'practice' && META.unl ? '不限時' : `剩 ${Math.max(0, Math.ceil(tl))} 秒`;
-  $('sWho').textContent = `${G.mode === 'practice' ? '單人練習' : (ME.call || '')}　第 ${G.used}／${SORTIES} 架`;
+  $('sWho').textContent = G.mode === 'practice' ? `單人練習　第 ${G.used} 架（不限架數）` : `${ME.call || ''}　第 ${G.used}／${SORTIES} 架`;
   $('sWho').style.color = ME.team >= 0 && G.mode !== 'practice' ? TEAMS[ME.team].c : '#fff';
   // 撞上設備、撞地、飛出範圍
   const k = stationAt(F.pos);
@@ -1807,9 +1842,9 @@ function studentTick(dt) {
   const lv = $('wLive'); const showLive = !$('scrWait').hidden && META.phase === 'wave' && LIVE && LIVE.wave === META.wave;
   lv.hidden = !showLive;
   if (showLive) lv.innerHTML = `第 ${LIVE.wave} 波　${LIVE.team === ALL ? '全班' : TEAMS[LIVE.team] ? TEAMS[LIVE.team].name : ''}進行中　${LIVE.left < 0 ? `不限時　已出擊 ${LIVE.used || 0}／${LIVE.total || 0} 架` : `剩 ${Math.max(0, LIVE.left)} 秒`}<br>雷達站耐久 ${LIVE.hp}／${LIVE.max}　摧毀設備 ${LIVE.dest} 項<br>空中 ${LIVE.air} 架　已被擊落 ${LIVE.shot} 架`;
-  if (!$('scrNext').hidden && G.nextT > 0) { G.nextT -= dt; if (G.nextT <= 0) { show(null); launchSortie(); } else $('nText').textContent = `還剩 ${SORTIES - G.used} 架。${Math.ceil(G.nextT)} 秒後自動起飛。`; }
+  if (!$('scrNext').hidden && G.nextT > 0) { G.nextT -= dt; if (G.nextT <= 0) { show(null); launchSortie(); } else $('nText').textContent = G.mode === 'practice' ? `飛機不限架數。${Math.ceil(G.nextT)} 秒後自動起飛。` : `還剩 ${SORTIES - G.used} 架。${Math.ceil(G.nextT)} 秒後自動起飛。`; }
   if (G.mode === 'practice') {
-    DEF.selfHit = 0.06; // 練習時彈幕很密，單發命中機率調低，讓蛇行、貼地飛的人有機會穿過去
+    DEF.selfHit = 0.012; // 練習時彈幕很密，單發命中機率調低，讓蛇行、貼地飛的人有機會穿過去
     autoDefend(dt, { gunRange: 320, barrage: true, missiles: true, missileGap: 14, nets: true, netGap: 6, mw: true, mwMin: 1 }); // 機槍塔在 320 公尺內自動連續射擊
     if (performance.now() / 1000 > G.endAt && !F.flying && !S.down && S.dead <= 0) stopPractice();
   }
@@ -1848,6 +1883,11 @@ function renderSnd() {
     else { b.textContent = SFX.on ? '音效：開' : '音效：關'; b.classList.toggle('off', !SFX.on); }
   });
 }
+/* ---------- 單人練習的時間（1 分鐘、1 分半、2 分鐘；記在自己的手機） ---------- */
+let PTIME = store.get('ptime', 120);
+function renderPt() { document.querySelectorAll('.ptRow button').forEach(b => b.classList.toggle('on', +b.dataset.pt === PTIME)); }
+document.querySelectorAll('.ptRow button').forEach(b => b.addEventListener('click', () => { PTIME = +b.dataset.pt; store.set('ptime', PTIME); renderPt(); }));
+renderPt();
 /* ---------- 上下操控反轉（每位同學自己選，記在自己的手機） ---------- */
 let INVY = store.get('invy', false);
 function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.innerHTML = swHtml('Y軸反轉', INVY ? '往上推＝俯衝' : '往上推＝抬頭', INVY); b.classList.toggle('on', INVY); }); }
