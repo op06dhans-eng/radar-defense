@@ -333,7 +333,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.17（開關排版修正）';
+const VERSION = '2.18（單人練習機砲自動射擊）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1342,7 +1342,7 @@ function updateWeapons(dt) {
   // 曳光彈
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i]; tr.life += dt; const prev = tr.m.position.clone(); tr.m.position.addScaledVector(tr.v, dt);
-    if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < 0.16) DEF.kill(c, 'gun'); } }
+    if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < (c.isSelf && DEF.selfHit !== undefined ? DEF.selfHit : 0.16)) DEF.kill(c, 'gun'); } }
     if (MODE === 'student' && SELF && SELF.alive && segDist(prev, tr.m.position, camera.position) < 5) nearMiss();
     if (tr.life > 1.4) { scene.remove(tr.m); tracers.splice(i, 1); }
   }
@@ -1431,6 +1431,8 @@ function autoDefend(dt, o) {
     if (st.manual) continue;
     st.cd -= dt; let best = null, bd = 1e9;
     for (const c of byDist) { if (netting.has(c)) continue; const dd = c.pos.distanceTo(st.center); if (dd < bd) { bd = dd; best = c; } }
+    // 彈幕模式（單人練習用）：像老師按住左鍵一樣連續射擊，距離越近越準
+    if (o.barrage) { if (best && bd < o.gunRange) { const err = 7 + bd * 0.09; const lead = best.pos.clone().addScaledVector(best.vel, bd / 620).add(V((R() - 0.5) * err, (R() - 0.5) * err, (R() - 0.5) * err)); const dir = gunAt(st, lead, dt, true); if (R() < dt * 32) fireGun(st, dir); } continue; }
     if (best && bd < o.gunRange) { const err = o.gunErr || 0; const lead = best.pos.clone().addScaledVector(best.vel, bd / 620).add(V((R() - 0.5) * err, (R() - 0.5) * err, (R() - 0.5) * err)); const dir = gunAt(st, lead, dt, false); if (st.cd <= 0) { fireGun(st, dir); st.cd = o.gunCd + R() * 0.05; } }
   }
   if (o.missiles) { const far = byDist.filter(c => c.pos.length() > 200 && c.pos.y - height(c.pos.x, c.pos.z) > 12 && !missiles.some(m => m.target === c))[0]; if (far && autoT.missile <= 0) { if (fireMissile(far)) autoT.missile = o.missileGap; } }
@@ -1807,7 +1809,8 @@ function studentTick(dt) {
   if (showLive) lv.innerHTML = `第 ${LIVE.wave} 波　${LIVE.team === ALL ? '全班' : TEAMS[LIVE.team] ? TEAMS[LIVE.team].name : ''}進行中　${LIVE.left < 0 ? `不限時　已出擊 ${LIVE.used || 0}／${LIVE.total || 0} 架` : `剩 ${Math.max(0, LIVE.left)} 秒`}<br>雷達站耐久 ${LIVE.hp}／${LIVE.max}　摧毀設備 ${LIVE.dest} 項<br>空中 ${LIVE.air} 架　已被擊落 ${LIVE.shot} 架`;
   if (!$('scrNext').hidden && G.nextT > 0) { G.nextT -= dt; if (G.nextT <= 0) { show(null); launchSortie(); } else $('nText').textContent = `還剩 ${SORTIES - G.used} 架。${Math.ceil(G.nextT)} 秒後自動起飛。`; }
   if (G.mode === 'practice') {
-    autoDefend(dt, { gunRange: 150, gunCd: 0.15, gunErr: 5, missiles: true, missileGap: 14, nets: true, netGap: 6, mw: true, mwMin: 1 });
+    DEF.selfHit = 0.06; // 練習時彈幕很密，單發命中機率調低，讓蛇行、貼地飛的人有機會穿過去
+    autoDefend(dt, { gunRange: 320, barrage: true, missiles: true, missileGap: 14, nets: true, netGap: 6, mw: true, mwMin: 1 }); // 機槍塔在 320 公尺內自動連續射擊
     if (performance.now() / 1000 > G.endAt && !F.flying && !S.down && S.dead <= 0) stopPractice();
   }
   // 連線時：照老師電腦傳來的角度轉動機槍塔並開火
