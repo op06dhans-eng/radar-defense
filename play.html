@@ -108,6 +108,19 @@ table.board th { color: var(--muted); font-weight: 700; }
 .cfg.lock button { opacity: 0.45; pointer-events: none; }
 /* 全螢幕卡片（學生畫面、結果） */
 .scr { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(6,8,9,0.72); overflow-y: auto; pointer-events: auto; touch-action: pan-y; }
+.replay { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.replay .rpTag { position: absolute; top: 3%; left: 2%; font-size: clamp(20px, 3.2vmin, 30px); font-weight: 900; color: #ff5a4e; background: rgba(0,0,0,0.6); padding: 4px 14px; border-radius: 8px; }
+.replay .rpTop { position: absolute; top: 3%; left: 50%; transform: translateX(-50%); text-align: center; background: rgba(8,10,12,0.8); border-radius: 12px; padding: 10px 26px; border-bottom: 6px solid var(--c, var(--hot)); max-width: 70%; }
+.replay .rpTop b { display: block; font-size: clamp(26px, 4.6vmin, 46px); font-weight: 900; color: var(--c, #fff); }
+.replay .rpTop span { display: block; font-size: clamp(20px, 3.4vmin, 32px); font-weight: 900; color: var(--hot); }
+.replay .rpInfo { position: absolute; bottom: 7%; left: 50%; transform: translateX(-50%); font-size: clamp(22px, 4vmin, 40px); font-weight: 900; background: rgba(8,10,12,0.75); padding: 8px 24px; border-radius: 10px; white-space: nowrap; }
+.replay .rpInfo .low { color: var(--ok); }
+.replay .rpInfo .bad { color: #ff7a6a; }
+.replay #rpSkip { position: absolute; right: 2%; bottom: 3%; pointer-events: auto; }
+.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.people > div { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 8px 12px; }
+.people b.h { display: block; color: var(--hot); font-size: clamp(18px, 3vmin, 24px); margin-bottom: 4px; }
+.people div div { font-size: clamp(16px, 2.8vmin, 21px); font-weight: 700; line-height: 1.5; }
 .card { width: min(760px, 100%); max-height: 100%; overflow-y: auto; background: var(--panel); border: 2px solid var(--line); border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; margin: auto; }
 .card h1 { margin: 0; font-size: clamp(26px, 4.6vmin, 40px); font-weight: 900; }
 .card h2 { margin: 0; font-size: clamp(20px, 3.6vmin, 30px); font-weight: 900; }
@@ -272,6 +285,7 @@ table.board th { color: var(--muted); font-weight: 700; }
   </aside>
   <button class="btn fold" id="tShow" hidden>打開面板</button>
   <section class="scr tres" id="tRes" hidden><div class="card" id="tResCard"></div></section>
+  <div class="replay" id="rpBox" hidden><div class="rpTag">● 重播</div><div class="rpTop" id="rpTop"><b id="rpTitle"></b><span id="rpWhy"></span></div><div class="rpInfo" id="rpInfo"></div><button class="btn" id="rpSkip">跳過重播</button></div>
   <div class="qrbig" id="qrBig" hidden><canvas id="qr2" width="400" height="400"></canvas><b>掃描加入　雷達站攻防</b></div>
 
   <div class="load" id="load">場景準備中…</div>
@@ -305,7 +319,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.7（右鍵轉向方向修正）';
+const VERSION = '2.8（精彩重播、個人榜）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1261,7 +1275,7 @@ function fireMissile(target, force) {
   const plume = new THREE.Sprite(plumeMat); plume.scale.setScalar(4); plume.position.z = -1.3; body.add(plume);
   body.position.copy(p).addScaledVector(fwd, 2); scene.add(body); SFX.missile(body.position);
   const dfd = MODE === 'defend'; for (let i = 0; i < (dfd ? 6 : 12); i++) smoke.spawn(body.position, V(R() - 0.5, R() * 0.5, R() - 0.5).multiplyScalar(6), { life: dfd ? 0.7 + R() * 0.4 : 1.8 + R() * 1.2, s0: 1.2, s1: dfd ? 3 : 4.5, a: dfd ? 0.35 : 0.5, c0: SMOKE_L, drag: 2.2, rise: 0.8 });
-  missiles.push({ body, plume, vel: fwd.clone().add(V(0, 0.8, 0)).normalize().multiplyScalar(30), target, t: 0, miss: false });
+  missiles.push({ id: nMiss, body, plume, vel: fwd.clone().add(V(0, 0.8, 0)).normalize().multiplyScalar(30), target, t: 0, miss: false });
   if (DEF.onFx) DEF.onFx('m', target);
   return true;
 }
@@ -1828,14 +1842,14 @@ function showResult() {
 
 function showRank(r) {
   setView('menu');
-  $('resCard').innerHTML = `<h1>總排名</h1>${rankHtml(r.rows || [], ME.team, r.all)}<button class="btn" id="rkBack">回去等待</button>`;
+  $('resCard').innerHTML = `<h1>總排名</h1>${rankHtml(r.rows || [], ME.team, r.all)}${peopleHtml(r.people, ME.call)}<button class="btn" id="rkBack">回去等待</button>`;
   show('scrRes'); $('rkBack').onclick = () => waitScreen();
 }
 
 /* =========================================================
    老師：QR Code 大廳、控制波次、第一人稱防守、判定命中、結果
    ========================================================= */
-const TS = { sid: '', phase: 'lobby', team: -1, wave: 0, startAt: 0, endsAt: 0, rehearsal: false, autoGuns: false, tally: null, board: {}, guns: 0 };
+const TS = { sid: '', phase: 'lobby', team: -1, wave: 0, startAt: 0, endsAt: 0, rehearsal: false, autoGuns: false, tally: null, board: {}, people: {}, guns: 0 };
 let TPLAYERS = {};
 const CALLS = ['獵鷹', '黃蜂', '夜梟', '雨燕', '赤隼', '青鷺', '雷鳥', '山雀', '灰鷂', '海燕', '蒼鷹', '燕鷗', '杜鵑', '伯勞', '鶺鴒'];
 const D = { yaw: 0, pitch: 0.04, drag: false, sx: 0, sy: 0, mx: -1, my: -1, fire: false, aimDir: V(0, 0, -1) };
@@ -1879,6 +1893,7 @@ function teacherInit() {
     else newSession();
   });
   NET.on('board', (b) => { TS.board = b || {}; renderBoard(); });
+  NET.on('people', (p) => { TS.people = p || {}; });
   NET.on('players', (p) => { TPLAYERS = p || {}; renderTeams(); for (const id of [...contacts.keys()]) { const c = contacts.get(id); if (!c.isBot && !TPLAYERS[id]) dropContact(id); } });
   NET.onChild('req', { added: (pid, r) => handleReq(pid, r) });
   NET.onChild('pos', { added: (pid, a) => posIn(pid, a), changed: (pid, a) => posIn(pid, a), removed: (pid) => { const c = contacts.get(pid); if (c && !c.isBot && c.alive) killVisual(c, 'gone'); } });
@@ -1908,8 +1923,8 @@ function teacherBack() {
   $('tPanel').hidden = false; $('tShow').hidden = true; renderGo();
 }
 function newSession() {
-  TS.sid = 's' + Date.now().toString(36); TS.wave = 0; TS.phase = 'lobby'; TS.board = {};
-  for (const p of ['players', 'req', 'ans', 'pos', 'kill', 'hit', 'fx', 'guns', 'res', 'board', 'live', 'rank']) NET.remove(p);
+  TS.sid = 's' + Date.now().toString(36); TS.wave = 0; TS.phase = 'lobby'; TS.board = {}; TS.people = {};
+  for (const p of ['people', 'players', 'req', 'ans', 'pos', 'kill', 'hit', 'fx', 'guns', 'res', 'board', 'live', 'rank']) NET.remove(p);
   NET.set('st', fullHp()); NET.set('meta', { sid: TS.sid, phase: 'lobby', team: -1, wave: 0 });
   for (const id of [...contacts.keys()]) dropContact(id);
   renderBoard();
@@ -1939,6 +1954,7 @@ function posIn(pid, a) {
 }
 function applyImpact(k, p, c) {
   if (TS.phase !== 'wave' && !TS.rehearsal) return;
+  recImpact(c, k, p);
   if (p) explosion(p.clone(), k ? 1.1 : 0.7);
   if (!k) { if (TS.tally) TS.tally.kills.crash++; return; }
   const st = STATIONS[k]; if (st.dead) return;
@@ -1952,7 +1968,8 @@ function applyImpact(k, p, c) {
 function tStartWave(team) {
   if (TS.phase === 'count' || TS.phase === 'wave') return;
   if (TS.rehearsal) stopRehearsal();
-  applyCfg();
+  finishReplay(true);
+  applyCfg(); recReset();
   TS.wave++; TS.team = team; TS.phase = 'count'; TS.tally = freshTally();
   TS.startAt = NET.now() + COUNT_SEC * 1000; TS.endsAt = TS.startAt + WAVE_SEC * 1000;
   resetDefense(); for (const id of [...contacts.keys()]) dropContact(id);
@@ -1972,8 +1989,11 @@ function tEndWave(radarDown) {
   NET.set('res', res); NET.set('board', TS.board);
   NET.update('meta', { phase: 'result' });
   NET.remove('guns'); NET.remove('live');
-  showTeacherResult(res); renderGo(); renderBoard(); renderCfg();
+  mergePeople(t);
+  renderGo(); renderBoard(); renderCfg();
   $('tPanel').hidden = false; $('tShow').hidden = true;
+  // 先在投影幕重播最接近雷達的一架，再顯示結果卡
+  startReplay(() => showTeacherResult(res));
 }
 function backToLobby() {
   TS.phase = 'lobby'; $('tRes').hidden = true;
@@ -1985,6 +2005,7 @@ function backToLobby() {
 function startRehearsal() {
   if (TS.phase === 'count' || TS.phase === 'wave') return;
   applyCfg();
+  finishReplay(true); recReset();
   TS.rehearsal = true; TS.tally = freshTally(); TS.team = -1; TS.endsAt = NET.now() + WAVE_SEC * 1000; renderCfg();
   resetDefense(); for (const id of [...contacts.keys()]) dropContact(id);
   DEF.botsOn = true;
@@ -1995,7 +2016,8 @@ function stopRehearsal(showRes) {
   if (!TS.rehearsal) return;
   TS.rehearsal = false; DEF.botsOn = false;
   for (const id of [...contacts.keys()]) if (contacts.get(id).isBot) dropContact(id);
-  if (showRes) { const t = TS.tally; showTeacherResult({ wave: 0, team: -1, radar: t.radar, dest: t.dest, kills: t.kills, sorties: t.sorties.size, usedM: t.usedM, usedN: t.usedN, usedW: t.usedW, mvp: mvpList(t) }); }
+  if (showRes) { const t = TS.tally; const res = { wave: 0, team: -1, radar: t.radar, dest: t.dest, kills: t.kills, sorties: t.sorties.size, usedM: t.usedM, usedN: t.usedN, usedW: t.usedW, mvp: mvpList(t) }; startReplay(() => showTeacherResult(res)); }
+  else REC.on = false;
   resetDefense(); renderGo(); renderCfg();
 }
 function showTeacherResult(r) {
@@ -2011,7 +2033,9 @@ function showTeacherResult(r) {
   html += costHtml(r);
   html += questionsHtml(r, 2);
   html += `<div class="row2"><button class="btn go" id="trBack">回到大廳</button><button class="btn" id="trHide">先看畫面</button></div>`;
+  if (RP.last) html += `<button class="btn" id="trReplay">再看一次重播</button>`;
   $('tResCard').innerHTML = html; $('tRes').hidden = false;
+  if (RP.last) $('trReplay').onclick = () => { $('tRes').hidden = true; startReplay(() => showTeacherResult(r), RP.last); };
   $('trBack').onclick = () => { $('tRes').hidden = true; if (TS.phase === 'result') backToLobby(); };
   $('trHide').onclick = () => { $('tRes').hidden = true; };
 }
@@ -2040,8 +2064,9 @@ function renderBoard() {
 }
 function publishRank() {
   const rows = rankRows(TS.board); const all = TS.board[ALL];
-  NET.set('rank', { at: NET.now(), rows, all: all ? { radar: all.radar, dest: all.dest, shot: all.shot } : null });
-  $('tResCard').innerHTML = `<h1>總排名</h1>${rankHtml(rows, -1, all)}<button class="btn go" id="trBack2">關閉</button>`; $('tRes').hidden = false;
+  const people = peopleTop(TS.people);
+  NET.set('rank', { at: NET.now(), rows, all: all ? { radar: all.radar, dest: all.dest, shot: all.shot } : null, people });
+  $('tResCard').innerHTML = `<h1>總排名</h1>${rankHtml(rows, -1, all)}${peopleHtml(people)}<button class="btn go" id="trBack2">關閉</button>`; $('tRes').hidden = false;
   $('trBack2').onclick = () => { $('tRes').hidden = true; };
 }
 $('tStop').onclick = () => { if (TS.rehearsal) stopRehearsal(true); else tEndWave(false); };
@@ -2061,6 +2086,8 @@ function nearestContact(dir, from, maxAng) {
   return best;
 }
 function teacherFrame(dt, time) {
+  if (RP.on) { replayFrame(dt); return; }
+  if (TS.phase === 'wave' || TS.rehearsal) recTick(dt);
   const kx = (IN.keys.ArrowRight || IN.keys.KeyD ? 1 : 0) - (IN.keys.ArrowLeft || IN.keys.KeyA ? 1 : 0);
   const ky = (IN.keys.ArrowUp || IN.keys.KeyW ? 1 : 0) - (IN.keys.ArrowDown || IN.keys.KeyS ? 1 : 0);
   D.yaw -= kx * 1.1 * dt; D.pitch = THREE.MathUtils.clamp(D.pitch + ky * 0.8 * dt, -0.4, 0.75);
@@ -2258,9 +2285,210 @@ $('tPip').onclick = () => { PIP.on = !PIP.on; $('tPip').textContent = `學生視
   addEventListener('keydown', (e) => {
     if (ROLE !== 'teacher') return; IN.keys[e.code] = true;
     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat && MODE === 'defend') fireJam(); }
+    if (RP.on) return;
     if (e.code === 'KeyH') $('tPanel').hidden ? $('tShow').click() : $('tHide').click();
     if (e.code.startsWith('Arrow')) e.preventDefault();
   });
+}
+
+/* =========================================================
+   精彩重播：每波結束時，在投影幕上重播最接近雷達的那一架
+   （老師電腦在波次中每 0.1 秒記錄每一架無人機與防空飛彈的位置）
+   ========================================================= */
+const REC = { on: false, t: 0, acc: 0, paths: new Map(), mis: new Map() };
+const ZONE_R = 250; // 防空圈：雷達站周圍 250 公尺
+function recReset() { REC.on = true; REC.t = 0; REC.acc = 0; REC.paths.clear(); REC.mis.clear(); RP.last = null; }
+function recOf(c) {
+  const k = c.id + ':' + c.sortie; let r = REC.paths.get(k);
+  if (!r) { r = { key: k, id: c.id, call: c.call, team: c.team, pts: [], minD: 1e9, zone: 0, hitK: null, end: null }; REC.paths.set(k, r); }
+  return r;
+}
+function recTick(dt) {
+  if (!REC.on) return;
+  REC.t += dt; REC.acc += dt; if (REC.acc < 0.1) return;
+  const step = REC.acc; REC.acc = 0; const t = REC.t; const rc = STATIONS.radar.center;
+  for (const c of contacts.values()) {
+    if (c.isSelf || c.sortie < 0) continue;
+    if (c.alive) {
+      const r = recOf(c); if (r.end) continue;
+      if (r.pts.length < 8000) r.pts.push(t, c.pos.x, c.pos.y, c.pos.z);
+      const d = c.pos.distanceTo(rc); if (d < r.minD) r.minD = d;
+      if (d < ZONE_R) r.zone += step;
+      const pr = perOf(c); if (pr) { pr.zone = Math.max(pr.zone || 0, r.zone); if (d < pr.minD) pr.minD = d; }
+    } else {
+      const r = REC.paths.get(c.id + ':' + c.sortie);
+      if (r && !r.end) r.end = { t, how: c.state === 'hit' ? 'hit' : (c.how || c.state) };
+    }
+  }
+  for (const m of missiles) {
+    if (!m.id) continue; let r = REC.mis.get(m.id);
+    if (!r) { r = { tid: m.target ? m.target.id + ':' + m.target.sortie : '', pts: [] }; REC.mis.set(m.id, r); }
+    if (r.pts.length < 3000) r.pts.push(t, m.body.position.x, m.body.position.y, m.body.position.z);
+  }
+}
+// 撞擊（雷達、設備或地面）：記下撞到什麼，最後一點放在撞擊位置
+function recImpact(c, k, p) {
+  if (!REC.on || !c) return; const r = REC.paths.get(c.id + ':' + c.sortie); if (!r) return;
+  if (!r.hitK || k === 'radar') r.hitK = k || 'ground';
+  if (p && !r.end) { const lt = r.pts.length ? r.pts[r.pts.length - 4] : 0; r.pts.push(Math.max(REC.t, lt + 0.05), p.x, p.y, p.z); }
+  if (!r.end) r.end = { t: REC.t, how: 'hit' };
+}
+// 挑哪一架：命中雷達（飛最久的那架）＞撞上防空設備＞最接近雷達
+function pickReplay() {
+  const arr = [...REC.paths.values()].filter(r => r.pts.length >= 4 * 8);
+  if (!arr.length) return null;
+  const dur = (r) => r.pts[r.pts.length - 4] - r.pts[0];
+  const hits = arr.filter(r => r.hitK === 'radar').sort((a, b) => dur(b) - dur(a));
+  if (hits.length) return { r: hits[0], why: hits.length > 1 ? `命中雷達站！（本波共 ${hits.length} 架命中）` : '命中雷達站！' };
+  const st = arr.filter(r => r.hitK && ST_INFO[r.hitK]).sort((a, b) => dur(b) - dur(a));
+  if (st.length) return { r: st[0], why: `撞上${ST_INFO[st[0].hitK].name}！` };
+  const c = arr.sort((a, b) => a.minD - b.minD)[0];
+  return { r: c, why: `最接近雷達站：${Math.round(c.minD)} 公尺` };
+}
+
+const RP = { on: false, last: null };
+const rpGroup = new THREE.Group(); scene.add(rpGroup);
+const END_TXT = { gun: '被機槍擊落', missile: '被防空飛彈擊落', mw: '被微波武器擊落', net: '被攔截網捕獲', boom: '被擊落', drop: '失去動力墜落', gone: '訊號中斷' };
+function startReplay(done, pick) {
+  REC.on = false;
+  pick = pick || pickReplay();
+  if (!pick) { done && done(); return; }
+  if (RP.on) finishReplay(true);
+  RP.last = pick;
+  const r = pick.r, P = r.pts, n = P.length / 4;
+  const tEnd = P[(n - 1) * 4], tStart = Math.max(P[0], tEnd - 10);
+  let i0 = 0; while (i0 < n - 2 && P[(i0 + 1) * 4] <= tStart) i0++;
+  const col = new THREE.Color(TEAMS[r.team] ? TEAMS[r.team].c : '#ff5a4e');
+  // 重播用的無人機、航跡線、往地面的垂直線（看得出飛多低）
+  const ghost = droneGeo.clone(); ghost.scale.setScalar(4.5); rpGroup.add(ghost);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: col.clone().multiplyScalar(3), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.55 }));
+  halo.scale.setScalar(0.4); ghost.add(halo);
+  const pts = [], cur = [];
+  for (let i = i0; i < n; i++) {
+    const x = P[i * 4 + 1], y = P[i * 4 + 2], z = P[i * 4 + 3]; pts.push(x, y, z);
+    if ((i - i0) % 3 === 0) cur.push(x, y, z, x, height(x, z), z);
+  }
+  // 航跡做成有粗細的管子，投影上才看得清楚
+  const vs = []; for (let i = 0; i < pts.length; i += 3) vs.push(V(pts[i], pts[i + 1], pts[i + 2]));
+  if (vs.length < 2) vs.push(vs[0].clone().add(V(0, 0.1, 0)));
+  const segs = Math.min(500, (vs.length - 1) * 2), RAD = 6;
+  const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(vs), segs, 0.45, RAD, false); tg.setDrawRange(0, 0);
+  const trail = new THREE.Mesh(tg, new THREE.MeshBasicMaterial({ color: col.clone().multiplyScalar(1.6), transparent: true, opacity: 0.9 })); trail.frustumCulled = false; rpGroup.add(trail);
+  // 總覽時改用較粗的航跡，遠看也清楚
+  const wide = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(vs), segs, 2.4, RAD, false), trail.material); wide.visible = false; wide.frustumCulled = false; rpGroup.add(wide);
+  // 每個記錄點對應到管子的哪一段（依沿途距離）
+  const cum = [0]; for (let i = 1; i < vs.length; i++) cum.push(cum[i - 1] + vs[i].distanceTo(vs[i - 1]));
+  const tot = cum[cum.length - 1] || 1; const segAt = cum.map(c => Math.round(c / tot * segs));
+  const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cur, 3)); cg.setDrawRange(0, 0);
+  const curtain = new THREE.LineSegments(cg, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.35 })); curtain.frustumCulled = false; rpGroup.add(curtain);
+  // 追這架的防空飛彈
+  const mis = [];
+  for (const m of REC.mis.values()) {
+    if (m.tid !== r.key || m.pts.length < 8) continue;
+    const sp = new THREE.Sprite(plumeMat); sp.scale.setScalar(5); sp.visible = false; rpGroup.add(sp);
+    const g = new THREE.BufferGeometry(); const a = []; for (let i = 0; i < m.pts.length; i += 4) a.push(m.pts[i + 1], m.pts[i + 2], m.pts[i + 3]);
+    g.setAttribute('position', new THREE.Float32BufferAttribute(a, 3)); g.setDrawRange(0, 0);
+    const ln = new THREE.Line(g, new THREE.LineBasicMaterial({ color: '#f4f1ea', transparent: true, opacity: 0.6 })); ln.frustumCulled = false; rpGroup.add(ln);
+    mis.push({ m, sp, ln });
+  }
+  // 全段最低離地高度（給最後的總覽用）
+  let minAgl = 1e9; for (let i = i0; i < n; i++) { const x = P[i * 4 + 1], z = P[i * 4 + 3]; minAgl = Math.min(minAgl, P[i * 4 + 2] - height(x, z)); }
+  // 總覽鏡頭：從側面看整段航跡
+  const a0 = V(P[i0 * 4 + 1], P[i0 * 4 + 2], P[i0 * 4 + 3]), a1 = V(P[(n - 1) * 4 + 1], P[(n - 1) * 4 + 2], P[(n - 1) * 4 + 3]);
+  const mid = a0.clone().add(a1).multiplyScalar(0.5); const ext = Math.max(40, a0.distanceTo(a1) / 2);
+  const dir = a1.clone().sub(a0).setY(0); if (dir.lengthSq() < 1) dir.set(1, 0, 0); dir.normalize();
+  const perp = V(-dir.z, 0, dir.x); if (perp.dot(V(0, 0, 1)) < 0) perp.multiplyScalar(-1);
+  const overPos = mid.clone().addScaledVector(perp, ext * 1.05 + 40).add(V(0, ext * 0.5 + 30, 0)); overPos.y = Math.max(overPos.y, height(overPos.x, overPos.z) + 30);
+  // 隱藏其他東西
+  const saved = []; for (const c of contacts.values()) { if (c.obj) { saved.push([c.obj, c.obj.visible]); c.obj.visible = false; } if (c.tag) c.tag.style.display = 'none'; }
+  const ui = {}; for (const id of ['hudT', 'tPanel', 'tShow', 'tRes', 'pip']) { ui[id] = $(id).hidden; $(id).hidden = true; }
+  RP.on = true; Object.assign(RP, { wide, segAt, RAD, pick, r, P, n, i: i0, i0, t: tStart, tEnd, ghost, trail, curtain, mis, minAgl, mid, overPos, saved, ui, done, phase: 'chase', hold: 0, cam: null, look: null, ended: false });
+  camera.fov = 68; resize();
+  const tn = TEAMS[r.team] ? TEAMS[r.team].name : '';
+  $('rpTop').style.setProperty('--c', TEAMS[r.team] ? TEAMS[r.team].c : '#fff');
+  $('rpTitle').textContent = `精彩重播　${r.call}${r.call.startsWith(tn) ? '' : '（' + tn + '）'}`;
+  $('rpWhy').textContent = pick.why; RP.infoH = ''; $('rpInfo').innerHTML = '';
+  $('rpBox').hidden = false;
+}
+function rpSample(t) {
+  const P = RP.P; while (RP.i < RP.n - 2 && P[(RP.i + 1) * 4] <= t) RP.i++;
+  const i = RP.i, ta = P[i * 4], tb = P[(i + 1) * 4]; const f = THREE.MathUtils.clamp((t - ta) / Math.max(0.001, tb - ta), 0, 1);
+  const a = V(P[i * 4 + 1], P[i * 4 + 2], P[i * 4 + 3]), b = V(P[i * 4 + 5], P[i * 4 + 6], P[i * 4 + 7]);
+  return { pos: a.clone().lerp(b, f), dir: b.clone().sub(a) };
+}
+function replayFrame(dt) {
+  SFX.setMusic(0);
+  const r = RP.r; let pos, dir;
+  if (RP.phase === 'chase') {
+    const left = RP.tEnd - RP.t; RP.t += dt * (left < 1.6 ? 0.45 : 1); // 最後 1.6 秒慢動作
+    if (RP.t >= RP.tEnd) { RP.t = RP.tEnd; RP.phase = 'end'; }
+  } else RP.hold += dt;
+  ({ pos, dir } = rpSample(RP.t));
+  if (dir.lengthSq() < 0.01) dir = RP.lastDir || V(0, 0, -1); dir.normalize(); RP.lastDir = dir;
+  RP.ghost.position.copy(pos);
+  RP.ghost.lookAt(pos.clone().add(dir)); RP.ghost.rotateX(-0.35);
+  RP.trail.geometry.setDrawRange(0, (RP.segAt[Math.min(RP.segAt.length - 1, RP.i - RP.i0 + 1)] || 0) * RP.RAD * 6);
+  RP.curtain.geometry.setDrawRange(0, Math.floor((RP.i - RP.i0) / 3 + 1) * 2);
+  // 防空飛彈
+  let near = false;
+  for (const o of RP.mis) {
+    const M = o.m.pts; let k = 0; while (k < M.length / 4 - 1 && M[(k + 1) * 4] <= RP.t) k++;
+    const show = M[0] <= RP.t && RP.t <= M[M.length - 4] + 0.2; o.sp.visible = show; o.ln.geometry.setDrawRange(0, M[0] <= RP.t ? k + 1 : 0);
+    if (show) { o.sp.position.set(M[k * 4 + 1], M[k * 4 + 2], M[k * 4 + 3]); if (o.sp.position.distanceTo(pos) < 160) near = true; }
+  }
+  // 結局：命中爆炸、被擊落
+  if (RP.phase === 'end' && !RP.ended) {
+    RP.ended = true; const e = r.end || { how: 'gone' };
+    if (e.how === 'hit' && r.hitK) { explosion(pos.clone(), r.hitK === 'radar' ? 1.4 : 1.0); RP.ghost.visible = false; }
+    else if (e.how === 'gun' || e.how === 'missile' || e.how === 'boom') { explosion(pos.clone(), 0.8); RP.ghost.visible = false; }
+    RP.endTxt = e.how === 'hit' ? (r.hitK === 'radar' ? '命中雷達站！' : r.hitK && ST_INFO[r.hitK] ? `撞上${ST_INFO[r.hitK].name}` : '撞上地面') : (END_TXT[e.how] || '本波時間到');
+  }
+  if (RP.phase === 'end' && RP.hold > 1.6) { RP.phase = 'over'; RP.hold = 0; RP.trail.visible = false; RP.wide.visible = true; }
+  if (RP.phase === 'over' && RP.hold > 4.2) { finishReplay(); return; }
+  // 鏡頭：追在無人機後上方；最後拉到側面看整段航跡
+  const want = pos.clone().addScaledVector(dir, -16).add(V(0, 5, 0)); want.y = Math.max(want.y, height(want.x, want.z) + 2.5);
+  const look = pos.clone().addScaledVector(dir, 8);
+  if (!RP.cam) { RP.cam = want.clone(); RP.look = look.clone(); }
+  if (RP.phase === 'over') { const k = Math.min(1, dt * 1.6); RP.cam.lerp(RP.overPos, k); RP.look.lerp(RP.mid, k); }
+  else { const k = Math.min(1, dt * 4); RP.cam.lerp(want, k); RP.look.lerp(look, k); }
+  camera.position.copy(RP.cam); camera.lookAt(RP.look); camera.updateMatrixWorld();
+  // 下方資訊
+  const agl = Math.max(0, Math.round(pos.y - height(pos.x, pos.z))); const d = Math.round(pos.distanceTo(STATIONS.radar.center));
+  let h;
+  if (RP.phase === 'over') h = `整段航跡　最低離地 ${Math.max(0, Math.round(RP.minAgl))} 公尺`;
+  else if (RP.phase === 'end') h = `<span class="${r.hitK === 'radar' ? 'low' : 'bad'}">${RP.endTxt}</span>`;
+  else { h = `離地 ${agl} 公尺　距離雷達 ${d} 公尺`; if (near) h += `　<span class="bad">防空飛彈追來了</span>`; else if (agl < 10) h += `　<span class="low">貼地飛行：雷達看不清楚、飛彈鎖不住</span>`; }
+  if (RP.infoH !== h) { RP.infoH = h; $('rpInfo').innerHTML = h; }
+}
+function finishReplay(silent) {
+  if (!RP.on) return;
+  RP.on = false; $('rpBox').hidden = true;
+  rpGroup.traverse(o => { if (o.isLine || o.isLineSegments || o === RP.trail || o === RP.wide) o.geometry.dispose(); });
+  rpGroup.clear();
+  for (const [o, v] of RP.saved) o.visible = v;
+  for (const id in RP.ui) $(id).hidden = RP.ui[id];
+  camera.fov = 62; resize();
+  const d = RP.done; RP.done = null;
+  if (!silent && d) d();
+}
+$('rpSkip').onclick = () => finishReplay();
+
+/* ---------- 個人累積紀錄（整堂課） ---------- */
+function mergePeople(t) {
+  const cnt = {}; for (const s of t.sorties) { const pid = s.split(':')[0]; cnt[pid] = (cnt[pid] || 0) + 1; }
+  for (const pid in t.per) {
+    const x = t.per[pid]; if (!TPLAYERS[pid]) continue;
+    const p = TS.people[pid] || (TS.people[pid] = { call: x.call, team: x.team, radar: 0, st: 0, minD: 1e9, zone: 0, sorties: 0 });
+    p.call = x.call; p.team = x.team; p.radar += x.radar; p.st += x.st; p.minD = Math.min(p.minD, x.minD); p.zone = Math.max(p.zone, Math.round((x.zone || 0) * 10) / 10);
+  }
+  for (const pid in cnt) if (TS.people[pid]) TS.people[pid].sorties += cnt[pid];
+  NET.set('people', TS.people);
+}
+function peopleTop(people) {
+  const arr = Object.values(people || {});
+  const top = (f, n, asc) => arr.filter(x => asc ? f(x) < 1e8 : f(x) > 0).sort((a, b) => asc ? f(a) - f(b) : f(b) - f(a)).slice(0, n).map(x => ({ call: x.call, team: x.team, v: Math.round(f(x)) }));
+  const radar = top(x => x.radar, 5);
+  return { radar, st: top(x => x.st, 3), zone: top(x => x.zone, 3), close: radar.length ? [] : top(x => x.minD, 3, true) };
 }
 
 /* =========================================================
@@ -2305,6 +2533,13 @@ function rankHtml(rows, myTeam, extra) {
   h += `</div><p class="muted">排名依序比較：命中雷達次數、摧毀設備數；都一樣時，被擊落較少的在前。</p>`;
   if (extra && extra.radar !== undefined) h += `<p>全班最後一波：命中雷達 ${extra.radar}・摧毀設備 ${extra.dest}・被擊落 ${extra.shot}</p>`;
   return h;
+}
+// 個人榜（整堂課累積）
+function peopleHtml(p, myCall) {
+  if (!p) return '';
+  const sec = (title, list, fmt) => list && list.length ? `<div><b class="h">${title}</b>${list.map((x, i) => `<div>${i + 1}. <b style="color:${TEAMS[x.team] ? TEAMS[x.team].c : '#fff'}">${x.call}</b>　${fmt(x.v)}${myCall && x.call === myCall ? '　← 你' : ''}</div>`).join('')}</div>` : '';
+  const h = sec('命中雷達最多', p.radar, v => `${v} 次`) + sec('撞擊防空設備最多', p.st, v => `${v} 次`) + sec('在防空圈內撐最久', p.zone, v => `${v} 秒`) + sec('最接近雷達站', p.close, v => `${v} 公尺`);
+  return h ? `<h2>個人榜</h2><div class="people">${h}</div><p class="muted" style="font-size:14px">防空圈是雷達站周圍 250 公尺內；「撐最久」看的是單一架無人機在圈內飛了多久。</p>` : '';
 }
 
 /* =========================================================
@@ -2360,7 +2595,7 @@ function frame() {
   requestAnimationFrame(frame);
   // 畫面每秒張數少時，拆成多個小步驟計算，遊戲速度維持真實時間
   const raw = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime; const n = Math.max(1, Math.ceil(raw / 0.034)); const dt = raw / n;
-  for (let i = 0; i < n; i++) simulate(dt, time);
+  if (!window.__hold) for (let i = 0; i < n; i++) simulate(dt, time); // __hold 只給自動測試用
   SFX.update(raw);
   // 電腦跑不動時（每秒少於 24 張）自動改用省電畫質
   PERF.t += raw; PERF.n++; if (PERF.t > 2) { const fps = PERF.n / PERF.t; PERF.low = fps < 24 ? PERF.low + 1 : 0; PERF.t = 0; PERF.n = 0; if (PERF.low >= 2 && QUALITY === 'high' && MODE !== 'menu') { QUALITY = 'low'; applyQuality(); PERF.low = 0; } }
@@ -2395,6 +2630,7 @@ requestAnimationFrame(frame);
 // 測試用
 window.__rd = { SFX, NET, TS, G, F, S, ME, DEF, STATIONS, contacts, IN, get META() { return META; }, get PLAYERS() { return PLAYERS; }, get TPLAYERS() { return TPLAYERS; }, get MODE() { return MODE; },
   step(sec, d = 0.033) { const n = Math.round(sec / d); for (let i = 0; i < n; i++) simulate(d, clock.elapsedTime + i * d); },
+  RP, REC, startReplay, finishReplay, publishRank, get PEOPLE() { return TS.people; },
   tStartWave, tEndWave, fireMissile, fireNet, fireJam, setStation, startRehearsal, stopRehearsal, startPractice, backToLobby, joinTeam, launchSortie, playerDown };
 
 </script>
