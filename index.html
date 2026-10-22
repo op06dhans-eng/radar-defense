@@ -340,7 +340,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.20（子彈撞擊聲改粗、改低）';
+const VERSION = '2.21（子彈撞擊聲重做：更硬、更寫實）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -875,6 +875,7 @@ const SFX = (() => {
     master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     gunBufs = [0, 1, 2, 3, 4].map(makeGunShot);
+    impBufs = [0, 1, 2, 3, 4, 5].map(makeImpact);
     // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
     L.motor = loopOsc(['sawtooth', 'sawtooth', 'triangle'], 'lowpass', MOBILE ? 3200 : 1800); // 螺旋槳：手機喇叭低音弱，保留較多高頻的嗡鳴
     L.wind = loopNoise('bandpass', 520, 0.7);
@@ -1025,26 +1026,41 @@ const SFX = (() => {
     flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + attack + dur);
     const g = out(peak, pan); env(g, peak, attack, dur); src.connect(flt); flt.connect(g); src.start(t, Math.random() * 1.5); src.stop(t + attack + dur + 0.05);
   }
-  // 子彈打在金屬機殼上的撞擊聲：不用純音（純音聽起來像敲玻璃），
-  // 改用雜訊通過幾個低頻、不成倍數的共振濾波器（像鐵皮被打中），加上尖銳的「喀」、機身悶響，再經過失真變粗糙
-  let DIST = null;
-  function metalAt(t, peak, pan, f) {
-    if (!DIST) { DIST = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; DIST[i] = Math.tanh(x * 4) / Math.tanh(4); } }
-    const g = out(peak, pan); g.gain.setValueAtTime(peak, t);
-    const sh = ctx.createWaveShaper(); sh.curve = DIST; sh.connect(g);
-    // 尖銳的撞擊「喀」
-    const s1 = ctx.createBufferSource(); s1.buffer = noiseBuf; const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2200;
-    const g1 = ctx.createGain(); g1.gain.setValueAtTime(0.9, t); g1.gain.exponentialRampToValueAtTime(0.0001, t + 0.014);
-    s1.connect(hp); hp.connect(g1); g1.connect(sh); s1.start(t, Math.random()); s1.stop(t + 0.03);
-    // 鐵皮共振（短、粗、偏低頻）
-    const s2 = ctx.createBufferSource(); s2.buffer = noiseBuf; const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, t); g2.gain.linearRampToValueAtTime(1, t + 0.002); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
-    s2.connect(g2);
-    for (const r of [0.56, 1, 1.71, 2.63]) { const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * r; bp.Q.value = 14; const bg = ctx.createGain(); bg.gain.value = 2.2 / (1 + r * 0.6); g2.connect(bp); bp.connect(bg); bg.connect(sh); }
-    s2.start(t, Math.random()); s2.stop(t + 0.14);
-    // 機身被打中的悶響「咚」
-    const b = ctx.createOscillator(); b.type = 'triangle'; b.frequency.setValueAtTime(170, t); b.frequency.exponentialRampToValueAtTime(55, t + 0.08);
-    const bg = ctx.createGain(); bg.gain.setValueAtTime(0.9, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.1); b.connect(bg); bg.connect(sh); b.start(t); b.stop(t + 0.12);
+  // 子彈打在金屬機殼上的撞擊聲（預先逐點合成好幾種，播放時隨機挑）：
+  // 子彈超音速的「啪」＋硬撞擊「喀」＋鐵皮短促共振（雜訊激發、很快停）＋機身悶響＋碎片噴濺的細碎聲，最後重度削波讓聲音又硬又兇
+  let impBufs = [];
+  function makeImpact(v) {
+    const sr = ctx.sampleRate, n = Math.floor(sr * 0.4), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+    const jit = () => 0.9 + Math.random() * 0.2;
+    const modes = [[760, 0.022], [1240, 0.018], [1980, 0.014], [2870, 0.011], [4050, 0.008], [5600, 0.006]].map(([f, tau]) => { f *= jit() * (1 + v * 0.03); const w = 2 * Math.PI * f / sr, r = Math.exp(-1 / (tau * sr)); return { c1: 2 * r * Math.cos(w), c2: -r * r, y1: 0, y2: 0, g: 0.06 }; });
+    const debris = []; for (let k = 0; k < 4 + Math.floor(Math.random() * 4); k++) debris.push([0.015 + Math.random() * 0.17, 0.15 + Math.random() * 0.35]);
+    let lp = 0, lp2 = 0, hpPrev = 0, ph = 0; const kLp = 1 - Math.exp(-2 * Math.PI * 450 / sr), kLp2 = 1 - Math.exp(-2 * Math.PI * 2600 / sr);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, w = Math.random() * 2 - 1;
+      const hp = w - hpPrev; hpPrev = w;
+      // 超音速子彈的「啪」：極短的 N 字形壓力波
+      const T = 0.0011; const crack = t < T ? (1 - 2 * t / T) * 1.4 : 0;
+      // 撞擊瞬間的寬頻「喀」
+      const ti = t - 0.003; const hit = ti > 0 ? (hp * 0.8 + w * 0.6) * Math.exp(-ti / 0.005) * 1.3 : 0;
+      // 鐵皮共振：只由撞擊那一下的雜訊激發，二十毫秒內就停
+      const ex = ti > 0 ? w * Math.exp(-ti / 0.0025) : 0; let ring = 0;
+      for (const m of modes) { const y = m.c1 * m.y1 + m.c2 * m.y2 + ex; m.y2 = m.y1; m.y1 = y; ring += y * m.g; }
+      // 機身被打的「啪噠」中低頻與悶響
+      lp += kLp * (w - lp); const thwack = ti > 0 ? lp * 6 * Math.exp(-ti / 0.028) : 0;
+      ph += 2 * Math.PI * (60 + 90 * Math.exp(-t / 0.015)) / sr; const thud = Math.sin(ph) * Math.exp(-t / 0.07) * 0.7;
+      // 碎片與漆皮噴濺：幾下細碎的「嚓」
+      lp2 += kLp2 * (w - lp2); let deb = 0; for (const [dt, a] of debris) { const td = t - dt; if (td > 0 && td < 0.02) deb += (w - lp2) * a * Math.exp(-td / 0.0025); }
+      const x = crack + hit + ring + thwack + thud + deb;
+      d[i] = Math.tanh(x * 2.6);
+    }
+    let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i])); for (let i = 0; i < n; i++) d[i] *= 0.97 / pk;
+    const fo = Math.floor(sr * 0.04); for (let i = 0; i < fo; i++) d[n - 1 - i] *= i / fo; // 結尾淡出，避免喀一聲
+    return buf;
+  }
+  function metalAt(t, peak, pan) {
+    if (!impBufs.length) impBufs = [0, 1, 2, 3, 4, 5].map(makeImpact);
+    const src = ctx.createBufferSource(); src.buffer = impBufs[Math.floor(Math.random() * impBufs.length)]; src.playbackRate.value = 0.88 + Math.random() * 0.24;
+    const g = out(peak, pan); g.gain.setValueAtTime(peak, t); src.connect(g); src.start(t);
   }
   let pingT = 0;
   function tone(type, f0, f1, peak, attack, dur, pan) {
@@ -1072,8 +1088,7 @@ const SFX = (() => {
     // 子彈擦過機身：粗糙的金屬撞擊聲
     ping() {
       if (!ok()) return; const now = ctx.currentTime; if (now - pingT < 0.07) return; pingT = now;
-      const pan = (Math.random() - 0.5) * 1.2; metalAt(now, 0.42, pan, 420 + Math.random() * 300);
-      if (Math.random() < 0.2) noiseHit('bandpass', 2400, 900, 5, 0.06, 0.005, 0.2, pan); // 偶爾帶一點跳彈的嘶聲
+      const pan = (Math.random() - 0.5) * 1.2; metalAt(now, 0.7, pan);
     },
     // 子彈從身邊飛過的咻聲
     whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
@@ -1092,7 +1107,7 @@ const SFX = (() => {
     // 自己被擊中
     hit(type) {
       if (!ok()) return;
-      if (type === 'gun') { const now = ctx.currentTime; [0, 0.045, 0.1, 0.16, 0.24].forEach((d, i) => metalAt(now + d, 0.5 - i * 0.05, (Math.random() - 0.5) * 1.2, 360 + Math.random() * 300)); noiseHit('lowpass', 1800, 300, 0.7, 0.3, 0.01, 0.4); noiseHit('bandpass', 700, 180, 2.5, 0.22, 0.03, 0.55); } // 連續幾發打在機殼上，接著機件碎裂的粗糙雜音
+      if (type === 'gun') { const now = ctx.currentTime; [0, 0.045, 0.1, 0.16, 0.24].forEach((d, i) => metalAt(now + d, 0.8 - i * 0.06, (Math.random() - 0.5) * 1.2)); noiseHit('lowpass', 1800, 300, 0.7, 0.3, 0.01, 0.4); noiseHit('bandpass', 700, 180, 2.5, 0.22, 0.03, 0.55); } // 連續幾發打在機殼上，接著機件碎裂的粗糙雜音
       else if (type === 'missile') { noiseHit('lowpass', 900, 120, 0.6, 0.45, 0.04, 1.3); tone('sine', 55, 25, 0.4, 0.05, 1.0); }
       else if (type === 'mw') { tone('square', 1200, 90, 0.12, 0.01, 0.6); noiseHit('highpass', 6000, 2000, 0.5, 0.18, 0.01, 0.5); }
       else if (type === 'net') { tone('sine', 100, 40, 0.35, 0.005, 0.2); noiseHit('bandpass', 700, 300, 1.5, 0.25, 0.01, 0.35); }
