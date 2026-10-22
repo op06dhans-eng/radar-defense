@@ -73,6 +73,8 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .team span { font-size: 26px; font-weight: 900; }
 .btns { display: flex; flex-direction: column; gap: 8px; }
 .btn { min-height: 48px; border-radius: 12px; border: 2px solid var(--line); background: #1b2124; color: #fff; font-size: 18px; font-weight: 900; padding: 6px 12px; }
+.sndS { position: absolute; pointer-events: auto; touch-action: manipulation; font-size: calc(var(--fs) * 0.62); font-weight: 900; color: #fff; background: rgba(0,0,0,0.45); border: 2px solid rgba(255,255,255,0.5); border-radius: 10px; padding: 6px 12px; font-family: var(--sans); }
+.sndS.off { border-color: #ff7a6a; color: #ffb3a8; }
 .btn.invBtn { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; }
 .invBtn > span { text-align: left; font-size: 20px; }
 .invBtn .sw { position: relative; width: 92px; height: 38px; border-radius: 19px; background: #3a4246; flex: none; font-size: 17px; font-weight: 900; color: #cfd6d3; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; transition: background 0.15s; }
@@ -172,6 +174,7 @@ table.board th { color: var(--muted); font-weight: 700; }
     <div class="t b" style="left:50%;top:8px;transform:translateX(-50%)" id="sDist">[ 600 ]</div>
     <div class="t" style="right:16px;top:12px;text-align:right" id="sSpd">108 km/h</div>
     <div class="t s" style="right:16px;top:calc(12px + var(--fs) * 1.35);text-align:right" id="sTime"></div>
+    <button class="sndS sndAny" style="right:max(16px, env(safe-area-inset-right));top:calc(18px + var(--fs) * 2.6)"></button>
     <svg class="cross" viewBox="0 0 100 100" aria-hidden="true"><g stroke="#fff" stroke-width="0.8" fill="none"><path d="M50 18v20M50 62v20M18 50h20M62 50h20"/><path d="M44 50h-3M59 50h-3M50 44v-3M50 59v-3"/><rect x="45" y="45" width="10" height="10"/></g></svg>
     <div id="sBoxes"></div>
     <div id="sTags"></div>
@@ -223,12 +226,12 @@ table.board th { color: var(--muted); font-weight: 700; }
   <section class="scr" id="scrJoin" hidden>
     <div class="card">
       <h1>雷達站攻防</h1>
-      <p>老師守著一座雷達站，旁邊有機槍塔、防空飛彈、微波武器和攔截網。你們要親手駕駛 FPV 自殺無人機衝過去。可以直接撞雷達站，也可以先撞掉防空設備。每一波 60 秒，每人最多出擊 5 架。</p>
+      <p>老師守著一座雷達站，旁邊有機槍塔、防空飛彈、微波武器和攔截網。你們要親手駕駛 FPV 自殺無人機衝過去。可以直接撞雷達站，也可以先撞掉防空設備。每一波的時間和每人可出擊幾架由老師設定。</p>
       <h2>選一隊加入（每隊最多 15 人）</h2>
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
       <button class="btn" id="practice1">先單人練習飛行</button>
-      <button class="btn invBtn"></button>
+      <div class="row2"><button class="btn invBtn"></button><button class="btn sndAny"></button></div>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
@@ -242,7 +245,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="livebox" id="wLive" hidden></div>
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
-      <div class="row2"><button class="btn" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
+      <div class="row2"><button class="btn sndAny" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
       <button class="btn invBtn"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
@@ -328,7 +331,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.15（手機音效修正）';
+const VERSION = '2.16（飛行中音效開關）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1532,7 +1535,7 @@ function waitScreen() {
   if ((META.phase === 'count' || META.phase === 'wave') && !myTurn()) { title = `現在是${META.team === ALL ? '全班' : TEAMS[META.team].name}上場`; text = '看投影幕，等一下就輪到你們。下面是這一波的即時戰況。'; }
   if (G.mode === 'done') { title = `你的 ${SORTIES} 架都出擊完了`; text = '看投影幕，等這一波結束。'; }
   $('wTitle').textContent = title; $('wText').textContent = text;
-  $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; $('sndBtn').textContent = `音效：${SFX.on ? '開' : '關'}`;
+  $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; renderSnd();
   $('fsBtn').hidden = !(document.documentElement.requestFullscreen && !document.fullscreenElement);
   setView('menu'); show('scrWait');
 }
@@ -1833,6 +1836,7 @@ function showResult() {
   $('resCard').innerHTML = html; show('scrRes'); $('rPractice').onclick = startPractice;
 }
 
+function renderSnd() { document.querySelectorAll('.sndAny').forEach(b => { b.textContent = SFX.on ? '音效：開' : '音效：關'; b.classList.toggle('off', !SFX.on); }); }
 /* ---------- 上下操控反轉（每位同學自己選，記在自己的手機） ---------- */
 let INVY = store.get('invy', false);
 function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.innerHTML = `<span>Y軸反轉<small style="display:block;font-size:14px;color:#aab5b0;font-weight:700">${INVY ? '往上推＝俯衝' : '往上推＝抬頭'}</small></span><b class="sw">${INVY ? '開' : '關'}</b>`; b.classList.toggle('on', INVY); }); }
@@ -1857,7 +1861,9 @@ renderInv();
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   $('practice1').onclick = startPractice; $('practice2').onclick = startPractice;
   $('qBtn').onclick = () => { QUALITY = QUALITY === 'high' ? 'low' : 'high'; store.set('q', QUALITY); applyQuality(); $('qBtn').textContent = `畫質：${QUALITY === 'high' ? '高畫質' : '省電'}`; };
-  $('sndBtn').onclick = () => { $('sndBtn').textContent = `音效：${SFX.toggle() ? '開' : '關'}`; };
+  // 音效開關：選隊畫面、等待畫面、飛行畫面右上角都有，按任何一個都會同步
+  document.querySelectorAll('.sndAny').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); SFX.toggle(); renderSnd(); }));
+  renderSnd();
   $('fsBtn').onclick = () => { document.documentElement.requestFullscreen().then(() => { try { screen.orientation.lock('landscape'); } catch (_) {} }).catch(() => {}); $('fsBtn').hidden = true; };
   $('nGo').onclick = () => { G.nextT = 0; show(null); launchSortie(); };
 }
