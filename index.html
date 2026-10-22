@@ -305,7 +305,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.6（起飛避開樹叢）';
+const VERSION = '2.7（右鍵轉向方向修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -2242,7 +2242,7 @@ $('tPip').onclick = () => { PIP.on = !PIP.on; $('tPip').textContent = `學生視
     else if (e.button === 0) D.fire = true;
   });
   cv.addEventListener('pointermove', (e) => {
-    if (D.drag) { const dx = e.clientX - D.sx, dy = e.clientY - D.sy; D.sx = e.clientX; D.sy = e.clientY; D.yaw += dx * 0.004; D.pitch = THREE.MathUtils.clamp(D.pitch + dy * 0.003, -0.4, 0.75); return; }
+    if (D.drag) { const dx = e.clientX - D.sx, dy = e.clientY - D.sy; D.sx = e.clientX; D.sy = e.clientY; D.yaw -= dx * 0.004; D.pitch = THREE.MathUtils.clamp(D.pitch - dy * 0.003, -0.4, 0.75); return; } // 滑鼠往右＝視角往右、往上＝視角往上
     D.mx = e.clientX; D.my = e.clientY;
   });
   const up = (e) => { if (e.button === 2) D.drag = false; else if (e.button === 0) D.fire = false; };
