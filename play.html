@@ -73,6 +73,7 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .team span { font-size: 26px; font-weight: 900; }
 .btns { display: flex; flex-direction: column; gap: 8px; }
 .btn { min-height: 48px; border-radius: 12px; border: 2px solid var(--line); background: #1b2124; color: #fff; font-size: 18px; font-weight: 900; padding: 6px 12px; }
+.btn.invBtn.on { border-color: var(--hot); background: rgba(255,150,60,0.25); }
 .btn.go { border-color: var(--c, var(--hot)); background: color-mix(in srgb, var(--c, var(--hot)) 25%, #111); }
 .btn.warn { border-color: #a33; background: #3a1512; }
 .btn:disabled { opacity: 0.4; cursor: default; }
@@ -222,6 +223,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <div class="pick" id="pick"></div>
       <p class="muted" id="joinMsg">連線中…</p>
       <button class="btn" id="practice1">先單人練習飛行</button>
+      <button class="btn invBtn"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
@@ -236,6 +238,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <p class="rotate">把手機橫放，畫面更寬、比較好飛。</p>
       <div class="row2"><button class="btn" id="practice2">單人練習飛行</button><button class="btn" id="qBtn">畫質：省電</button></div>
       <div class="row2"><button class="btn" id="sndBtn">音效：開</button><button class="btn" id="fsBtn" hidden>全螢幕</button></div>
+      <button class="btn invBtn"></button>
       <button class="btn backrole" hidden>回到選擇身分</button>
     </div>
   </section>
@@ -251,6 +254,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <h2 id="nTitle">第 2 架準備起飛</h2>
       <p id="nText"></p>
       <button class="btn go" id="nGo">起飛</button>
+      <button class="btn invBtn"></button>
     </div>
   </section>
 
@@ -276,7 +280,7 @@ table.board th { color: var(--muted); font-weight: 700; }
       <b>難度設定</b>
       <div><span>雷達站耐久</span><button data-k="hp" data-v="10">10</button><button data-k="hp" data-v="15">15</button><button data-k="hp" data-v="20">20</button></div>
       <div><span>每人架數</span><button data-k="sorties" data-v="3">3</button><button data-k="sorties" data-v="5">5</button><button data-k="sorties" data-v="8">8</button></div>
-      <div><span>每波秒數</span><button data-k="sec" data-v="60">60</button><button data-k="sec" data-v="90">90</button><button data-k="sec" data-v="120">120</button></div>
+      <div><span>每波秒數</span><button data-k="sec" data-v="60">60</button><button data-k="sec" data-v="90">90</button><button data-k="sec" data-v="120">120</button><button data-k="sec" data-v="0">不限時</button></div>
     </div>
     <table class="board" id="tBoard"></table>
     <button class="btn go" id="tRank">公布總排名</button>
@@ -320,7 +324,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.11（iPhone 拖曳時網頁晃動修正）';
+const VERSION = '2.13（上下反轉、不限時模式）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1577,7 +1581,7 @@ function launchSortie() {
   if (G.mode === 'practice') contacts.set(SELF.id, SELF);
   S.down = null; S.dead = 0; S.mAlert = false; netOv.visible = false; fpvPass.uniforms.glitch.value = 0; fpvPass.uniforms.grain.value = 0.06; alertMsg(null);
   $('endCard').hidden = true; $('nosig').hidden = true; show(null); setView('student');
-  if (!ME.tipShown) { ME.tipShown = true; F.tipT = 7; $('sTip').innerHTML = MOBILE ? '左邊推桿：轉向、往上推抬頭、往下推俯衝<br>右邊按住「加速」：飛更快，但轉彎變鈍<br>貼地飛（離地 10 公尺內）可以甩掉飛彈' : '方向鍵或 W A S D：轉向、抬頭、俯衝<br>按住空白鍵：加速（轉彎變鈍）<br>貼地飛（離地 10 公尺內）可以甩掉飛彈'; $('sTip').hidden = false; }
+  if (!ME.tipShown) { ME.tipShown = true; F.tipT = 7; $('sTip').innerHTML = MOBILE ? `左邊推桿：轉向、${INVY ? '往上推俯衝、往下推抬頭（上下反轉）' : '往上推抬頭、往下推俯衝'}<br>右邊按住「加速」：飛更快，但轉彎變鈍<br>貼地飛（離地 10 公尺內）可以甩掉飛彈` : `方向鍵或 W A S D：轉向、${INVY ? '抬頭、俯衝（上下反轉）' : '抬頭、俯衝'}<br>按住空白鍵：加速（轉彎變鈍）<br>貼地飛（離地 10 公尺內）可以甩掉飛彈`; $('sTip').hidden = false; }
   sendPos(S_FLY);
 }
 function sendPos(state) {
@@ -1734,7 +1738,7 @@ function studentFrame(dt, time) {
   // 操作
   const kx = (IN.keys.ArrowRight || IN.keys.KeyD ? 1 : 0) - (IN.keys.ArrowLeft || IN.keys.KeyA ? 1 : 0);
   const ky = (IN.keys.ArrowUp || IN.keys.KeyW ? 1 : 0) - (IN.keys.ArrowDown || IN.keys.KeyS ? 1 : 0);
-  const sx = THREE.MathUtils.clamp(IN.sx + kx, -1, 1), sy = THREE.MathUtils.clamp(IN.sy + ky, -1, 1);
+  const sx = THREE.MathUtils.clamp(IN.sx + kx, -1, 1), sy = THREE.MathUtils.clamp(IN.sy + ky, -1, 1) * (INVY ? -1 : 1); // 上下反轉：往上推＝俯衝
   F.boost = IN.boost || !!IN.keys.Space;
   const turn = F.boost ? 0.45 : 1;
   F.yaw -= sx * 1.7 * turn * dt;
@@ -1755,7 +1759,7 @@ function studentFrame(dt, time) {
   $('sDist').textContent = `[ ${Math.round(dist)} ]`;
   $('sSpd').textContent = `${Math.round(F.speed * 3.6)} km/h`;
   const tl = G.mode === 'practice' ? G.endAt - performance.now() / 1000 : ((META.endsAt || 0) - NET.now()) / 1000;
-  $('sTime').textContent = `剩 ${Math.max(0, Math.ceil(tl))} 秒`;
+  $('sTime').textContent = G.mode !== 'practice' && META.unl ? '不限時' : `剩 ${Math.max(0, Math.ceil(tl))} 秒`;
   $('sWho').textContent = `${G.mode === 'practice' ? '單人練習' : (ME.call || '')}　第 ${G.used}／${SORTIES} 架`;
   $('sWho').style.color = ME.team >= 0 && G.mode !== 'practice' ? TEAMS[ME.team].c : '#fff';
   // 撞上設備、撞地、飛出範圍
@@ -1783,7 +1787,7 @@ function studentTick(dt) {
   if (META.phase === 'wave' && myTurn() && G.mode !== 'wave' && G.mode !== 'done' && G.mode !== 'practice') startWave();
   const lv = $('wLive'); const showLive = !$('scrWait').hidden && META.phase === 'wave' && LIVE && LIVE.wave === META.wave;
   lv.hidden = !showLive;
-  if (showLive) lv.innerHTML = `第 ${LIVE.wave} 波　${LIVE.team === ALL ? '全班' : TEAMS[LIVE.team] ? TEAMS[LIVE.team].name : ''}進行中　剩 ${Math.max(0, LIVE.left)} 秒<br>雷達站耐久 ${LIVE.hp}／${LIVE.max}　摧毀設備 ${LIVE.dest} 項<br>空中 ${LIVE.air} 架　已被擊落 ${LIVE.shot} 架`;
+  if (showLive) lv.innerHTML = `第 ${LIVE.wave} 波　${LIVE.team === ALL ? '全班' : TEAMS[LIVE.team] ? TEAMS[LIVE.team].name : ''}進行中　${LIVE.left < 0 ? `不限時　已出擊 ${LIVE.used || 0}／${LIVE.total || 0} 架` : `剩 ${Math.max(0, LIVE.left)} 秒`}<br>雷達站耐久 ${LIVE.hp}／${LIVE.max}　摧毀設備 ${LIVE.dest} 項<br>空中 ${LIVE.air} 架　已被擊落 ${LIVE.shot} 架`;
   if (!$('scrNext').hidden && G.nextT > 0) { G.nextT -= dt; if (G.nextT <= 0) { show(null); launchSortie(); } else $('nText').textContent = `還剩 ${SORTIES - G.used} 架。${Math.ceil(G.nextT)} 秒後自動起飛。`; }
   if (G.mode === 'practice') {
     autoDefend(dt, { gunRange: 150, gunCd: 0.15, gunErr: 5, missiles: true, missileGap: 14, nets: true, netGap: 6, mw: true, mwMin: 1 });
@@ -1817,6 +1821,11 @@ function showResult() {
   $('resCard').innerHTML = html; show('scrRes'); $('rPractice').onclick = startPractice;
 }
 
+/* ---------- 上下操控反轉（每位同學自己選，記在自己的手機） ---------- */
+let INVY = store.get('invy', false);
+function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.textContent = INVY ? '上下操控：反轉（往上推＝俯衝）' : '上下操控：一般（往上推＝抬頭）'; b.classList.toggle('on', INVY); }); }
+document.querySelectorAll('.invBtn').forEach(b => b.addEventListener('click', () => { INVY = !INVY; store.set('invy', INVY); renderInv(); }));
+renderInv();
 /* ---------- 觸控推桿與按鍵 ---------- */
 {
   const stick = $('stick'), knob = $('knob'); let sid = null;
@@ -1873,6 +1882,8 @@ function renderCfg() {
   $('tCfg').classList.toggle('lock', TS.phase === 'count' || TS.phase === 'wave' || TS.rehearsal);
 }
 function applyCfg() { ST_INFO.radar.hp = CFG.hp; STATIONS.radar.max = CFG.hp; SORTIES = CFG.sorties; if (!Q.get('wave')) WAVE_SEC = CFG.sec; }
+// 不限時：每波秒數設為 0。等這一隊每個人都飛完自己的架數、空中沒有無人機時自動結束
+const UNLIMITED_CAP = 1800, IDLE_END = 25;
 // 學生網址：從 GitHub 網頁打開時用同一個資料夾的 play.html；從下載的檔案打開時，固定指向 GitHub 上的學生網址
 const PUBLIC_PLAY = 'https://op06dhans-eng.github.io/radar-defense/play.html';
 function studentURL() { return location.protocol === 'file:' ? PUBLIC_PLAY : location.origin + location.pathname.replace(/[^/]*$/, '') + 'play.html'; }
@@ -1972,11 +1983,12 @@ function tStartWave(team) {
   finishReplay(true);
   applyCfg(); recReset();
   TS.wave++; TS.team = team; TS.phase = 'count'; TS.tally = freshTally();
-  TS.startAt = NET.now() + COUNT_SEC * 1000; TS.endsAt = TS.startAt + WAVE_SEC * 1000;
+  TS.unlimited = WAVE_SEC <= 0; TS.idle = 0;
+  TS.startAt = NET.now() + COUNT_SEC * 1000; TS.endsAt = TS.startAt + (TS.unlimited ? UNLIMITED_CAP : WAVE_SEC) * 1000;
   resetDefense(); for (const id of [...contacts.keys()]) dropContact(id);
   for (const p of ['fx', 'kill', 'hit', 'pos', 'res']) NET.remove(p);
   NET.set('st', fullHp());
-  NET.set('meta', { sid: TS.sid, phase: 'count', team, wave: TS.wave, startAt: TS.startAt, endsAt: TS.endsAt, sorties: SORTIES });
+  NET.set('meta', { sid: TS.sid, phase: 'count', team, wave: TS.wave, startAt: TS.startAt, endsAt: TS.endsAt, sorties: SORTIES, unl: TS.unlimited ? 1 : 0 });
   $('tRes').hidden = true; renderGo(); renderCfg();
   $('tPanel').hidden = true; $('tShow').hidden = false;
 }
@@ -2007,7 +2019,7 @@ function startRehearsal() {
   if (TS.phase === 'count' || TS.phase === 'wave') return;
   applyCfg();
   finishReplay(true); recReset();
-  TS.rehearsal = true; TS.tally = freshTally(); TS.team = -1; TS.endsAt = NET.now() + WAVE_SEC * 1000; renderCfg();
+  TS.rehearsal = true; TS.tally = freshTally(); TS.team = -1; TS.unlimited = false; TS.endsAt = NET.now() + (WAVE_SEC > 0 ? WAVE_SEC : 120) * 1000; renderCfg(); // 演練沒有「飛完」的時候，不限時改跑 120 秒
   resetDefense(); for (const id of [...contacts.keys()]) dropContact(id);
   DEF.botsOn = true;
   for (let i = 0; i < 15; i++) { const c = makeContact('bot' + i, i % 4, '電腦-' + (i + 1), { isBot: true }); spawnBot(c); c.pos.lerp(V(0, c.pos.y, 0), i / 15 * 0.5); TS.tally.sorties.add(c.id + ':' + c.sortie); }
@@ -2114,9 +2126,15 @@ function teacherFrame(dt, time) {
   const now = NET.now();
   if (TS.phase === 'count' && now >= TS.startAt) { TS.phase = 'wave'; NET.update('meta', { phase: 'wave' }); }
   if (TS.phase === 'wave' && now >= TS.endsAt) tEndWave(false);
+  if (TS.phase === 'wave' && TS.unlimited) {
+    const pr = unlimitedProgress();
+    TS.idle = pr.air > 0 ? 0 : TS.idle + dt;
+    // 全隊都飛完而且空中沒有無人機 → 結束；或空中已經很久沒有無人機（有人沒起飛、手機睡著）→ 也結束
+    if ((pr.total > 0 && pr.used >= pr.total && TS.idle > 2.5) || (TS.idle > IDLE_END && pr.used > 0)) tEndWave(false);
+  }
   if (TS.rehearsal && now >= TS.endsAt) stopRehearsal(true);
   // 機槍塔角度傳給學生（每秒約 6 次）
-  if (TS.phase === 'wave') { TS.liveT = (TS.liveT || 0) - dt; if (TS.liveT <= 0) { TS.liveT = 1; let air = 0; for (const c of contacts.values()) if (c.alive) air++; const t = TS.tally; NET.set('live', { wave: TS.wave, team: TS.team, left: Math.ceil((TS.endsAt - now) / 1000), hp: STATIONS.radar.hp, max: STATIONS.radar.max, shot: t.kills.gun + t.kills.missile + t.kills.mw + t.kills.net, air, dest: t.dest.length }); } }
+  if (TS.phase === 'wave') { TS.liveT = (TS.liveT || 0) - dt; if (TS.liveT <= 0) { TS.liveT = 1; let air = 0; for (const c of contacts.values()) if (c.alive) air++; const t = TS.tally; NET.set('live', { wave: TS.wave, team: TS.team, left: TS.unlimited ? -1 : Math.ceil((TS.endsAt - now) / 1000), used: TS.unlimited ? unlimitedProgress().used : 0, total: TS.unlimited ? unlimitedProgress().total : 0, hp: STATIONS.radar.hp, max: STATIONS.radar.max, shot: t.kills.gun + t.kills.missile + t.kills.mw + t.kills.net, air, dest: t.dest.length }); } }
   if (TS.phase === 'wave') { TS.guns -= dt; if (TS.guns <= 0) { TS.guns = 0.16; NET.set('guns', GUNS.map(g => [Math.round(g.turret.rotation.y * 100) / 100, Math.round(g.gun.rotation.x * 100) / 100, g.fireT < 0.25 ? 1 : 0])); } }
   $('hudT').classList.toggle('wp', !$('tPanel').hidden);
   pipUpdate(dt);
@@ -2125,11 +2143,20 @@ function teacherFrame(dt, time) {
   SFX.setMusic((TS.phase === 'wave' || TS.rehearsal) ? (tl < 10 ? 2 : 1) : TS.phase === 'count' ? 1 : 0);
   teacherHud(now);
 }
+// 不限時模式的進度：這一隊每個人飛了幾架
+function unlimitedProgress() {
+  const cnt = {}; if (TS.tally) for (const s of TS.tally.sorties) { const pid = s.split(':')[0]; cnt[pid] = (cnt[pid] || 0) + 1; }
+  let used = 0, total = 0, air = 0;
+  for (const pid in TPLAYERS) { const p = TPLAYERS[pid]; if (!p || !(TS.team === ALL || p.team === TS.team)) continue; total += SORTIES; used += Math.min(SORTIES, cnt[pid] || 0); }
+  for (const c of contacts.values()) if (c.alive && !c.isBot) air++;
+  return { used, total, air };
+}
 function teacherHud(now) {
   const radar = STATIONS.radar;
   let wt = '大廳：等待開始';
   const tn = TS.team === ALL ? '全班' : TS.team >= 0 ? TEAMS[TS.team].name : '';
   if (TS.phase === 'count') wt = `第 ${TS.wave} 波　${tn}　${Math.max(0, Math.ceil((TS.startAt - now) / 1000))} 秒後開始`;
+  else if (TS.phase === 'wave' && TS.unlimited) { const pr = unlimitedProgress(); wt = `第 ${TS.wave} 波　${tn}　不限時　已出擊 ${pr.used}／${pr.total} 架`; }
   else if (TS.phase === 'wave') wt = `第 ${TS.wave} 波　${tn}　剩 ${Math.max(0, Math.ceil((TS.endsAt - now) / 1000))} 秒`;
   else if (TS.phase === 'result') wt = `第 ${TS.wave} 波結束`;
   if (TS.rehearsal) wt = `演練中　剩 ${Math.max(0, Math.ceil((TS.endsAt - now) / 1000))} 秒`;
