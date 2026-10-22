@@ -340,7 +340,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.19（金屬撞擊聲、練習命中率調低、練習時間選擇）';
+const VERSION = '2.20（子彈撞擊聲改粗、改低）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1025,18 +1025,26 @@ const SFX = (() => {
     flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + attack + dur);
     const g = out(peak, pan); env(g, peak, attack, dur); src.connect(flt); flt.connect(g); src.start(t, Math.random() * 1.5); src.stop(t + attack + dur + 0.05);
   }
-  // 子彈打在金屬機殼上的「鏘」：幾個不成倍數的高頻泛音快速衰減，加上敲擊瞬間的雜訊和機身的悶響
+  // 子彈打在金屬機殼上的撞擊聲：不用純音（純音聽起來像敲玻璃），
+  // 改用雜訊通過幾個低頻、不成倍數的共振濾波器（像鐵皮被打中），加上尖銳的「喀」、機身悶響，再經過失真變粗糙
+  let DIST = null;
   function metalAt(t, peak, pan, f) {
+    if (!DIST) { DIST = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; DIST[i] = Math.tanh(x * 4) / Math.tanh(4); } }
     const g = out(peak, pan); g.gain.setValueAtTime(peak, t);
-    [[1, 0.16, 0.5], [1.58, 0.11, 0.35], [2.37, 0.08, 0.28], [3.41, 0.06, 0.2], [4.62, 0.04, 0.14]].forEach(([r, d, a]) => {
-      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * r * (0.99 + Math.random() * 0.02);
-      const og = ctx.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.linearRampToValueAtTime(a, t + 0.0015); og.gain.exponentialRampToValueAtTime(0.0001, t + d * 1.6);
-      o.connect(og); og.connect(g); o.start(t); o.stop(t + d * 1.6 + 0.05);
-    });
-    const src = ctx.createBufferSource(); src.buffer = noiseBuf; const flt = ctx.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = 3800; flt.Q.value = 0.8;
-    const ng = ctx.createGain(); ng.gain.setValueAtTime(0.9, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.03); src.connect(flt); flt.connect(ng); ng.connect(g); src.start(t, Math.random()); src.stop(t + 0.05);
-    const b = ctx.createOscillator(); b.type = 'triangle'; b.frequency.setValueAtTime(280, t); b.frequency.exponentialRampToValueAtTime(90, t + 0.07);
-    const bg = ctx.createGain(); bg.gain.setValueAtTime(0.55, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.09); b.connect(bg); bg.connect(g); b.start(t); b.stop(t + 0.12);
+    const sh = ctx.createWaveShaper(); sh.curve = DIST; sh.connect(g);
+    // 尖銳的撞擊「喀」
+    const s1 = ctx.createBufferSource(); s1.buffer = noiseBuf; const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2200;
+    const g1 = ctx.createGain(); g1.gain.setValueAtTime(0.9, t); g1.gain.exponentialRampToValueAtTime(0.0001, t + 0.014);
+    s1.connect(hp); hp.connect(g1); g1.connect(sh); s1.start(t, Math.random()); s1.stop(t + 0.03);
+    // 鐵皮共振（短、粗、偏低頻）
+    const s2 = ctx.createBufferSource(); s2.buffer = noiseBuf; const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, t); g2.gain.linearRampToValueAtTime(1, t + 0.002); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    s2.connect(g2);
+    for (const r of [0.56, 1, 1.71, 2.63]) { const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * r; bp.Q.value = 14; const bg = ctx.createGain(); bg.gain.value = 2.2 / (1 + r * 0.6); g2.connect(bp); bp.connect(bg); bg.connect(sh); }
+    s2.start(t, Math.random()); s2.stop(t + 0.14);
+    // 機身被打中的悶響「咚」
+    const b = ctx.createOscillator(); b.type = 'triangle'; b.frequency.setValueAtTime(170, t); b.frequency.exponentialRampToValueAtTime(55, t + 0.08);
+    const bg = ctx.createGain(); bg.gain.setValueAtTime(0.9, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.1); b.connect(bg); bg.connect(sh); b.start(t); b.stop(t + 0.12);
   }
   let pingT = 0;
   function tone(type, f0, f1, peak, attack, dur, pan) {
@@ -1061,11 +1069,11 @@ const SFX = (() => {
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
     _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
     gunBurst(firing, n) { burstOn = !!firing && n > 0 && ok(); burstN = n; },
-    // 子彈擦過機身：金屬「鏘」一聲，有時帶跳彈的尖嘯
+    // 子彈擦過機身：粗糙的金屬撞擊聲
     ping() {
       if (!ok()) return; const now = ctx.currentTime; if (now - pingT < 0.07) return; pingT = now;
-      const pan = (Math.random() - 0.5) * 1.2; metalAt(now, 0.38, pan, 1700 + Math.random() * 1600);
-      if (Math.random() < 0.35) tone('sine', 3400 + Math.random() * 800, 1300, 0.05, 0.01, 0.3, pan);
+      const pan = (Math.random() - 0.5) * 1.2; metalAt(now, 0.42, pan, 420 + Math.random() * 300);
+      if (Math.random() < 0.2) noiseHit('bandpass', 2400, 900, 5, 0.06, 0.005, 0.2, pan); // 偶爾帶一點跳彈的嘶聲
     },
     // 子彈從身邊飛過的咻聲
     whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
@@ -1084,7 +1092,7 @@ const SFX = (() => {
     // 自己被擊中
     hit(type) {
       if (!ok()) return;
-      if (type === 'gun') { const now = ctx.currentTime; [0, 0.045, 0.1, 0.16, 0.24].forEach((d, i) => metalAt(now + d, 0.48 - i * 0.05, (Math.random() - 0.5) * 1.2, 1500 + Math.random() * 1800)); noiseHit('lowpass', 1800, 300, 0.7, 0.3, 0.01, 0.4); tone('square', 520, 160, 0.06, 0.25, 0.5); } // 連續幾發打在機殼上，接著馬達受損的嘎聲
+      if (type === 'gun') { const now = ctx.currentTime; [0, 0.045, 0.1, 0.16, 0.24].forEach((d, i) => metalAt(now + d, 0.5 - i * 0.05, (Math.random() - 0.5) * 1.2, 360 + Math.random() * 300)); noiseHit('lowpass', 1800, 300, 0.7, 0.3, 0.01, 0.4); noiseHit('bandpass', 700, 180, 2.5, 0.22, 0.03, 0.55); } // 連續幾發打在機殼上，接著機件碎裂的粗糙雜音
       else if (type === 'missile') { noiseHit('lowpass', 900, 120, 0.6, 0.45, 0.04, 1.3); tone('sine', 55, 25, 0.4, 0.05, 1.0); }
       else if (type === 'mw') { tone('square', 1200, 90, 0.12, 0.01, 0.6); noiseHit('highpass', 6000, 2000, 0.5, 0.18, 0.01, 0.5); }
       else if (type === 'net') { tone('sine', 100, 40, 0.35, 0.005, 0.2); noiseHit('bandpass', 700, 300, 1.5, 0.25, 0.01, 0.35); }
