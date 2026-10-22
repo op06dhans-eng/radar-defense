@@ -73,7 +73,12 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .team span { font-size: 26px; font-weight: 900; }
 .btns { display: flex; flex-direction: column; gap: 8px; }
 .btn { min-height: 48px; border-radius: 12px; border: 2px solid var(--line); background: #1b2124; color: #fff; font-size: 18px; font-weight: 900; padding: 6px 12px; }
-.btn.invBtn.on { border-color: var(--hot); background: rgba(255,150,60,0.25); }
+.btn.invBtn { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; }
+.invBtn > span { text-align: left; font-size: 20px; }
+.invBtn .sw { position: relative; width: 92px; height: 38px; border-radius: 19px; background: #3a4246; flex: none; font-size: 17px; font-weight: 900; color: #cfd6d3; display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; transition: background 0.15s; }
+.invBtn .sw::before { content: ''; position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.invBtn.on .sw { background: var(--ok); color: #062; justify-content: flex-start; }
+.invBtn.on .sw::before { transform: translateX(54px); }
 .btn.go { border-color: var(--c, var(--hot)); background: color-mix(in srgb, var(--c, var(--hot)) 25%, #111); }
 .btn.warn { border-color: #a33; background: #3a1512; }
 .btn:disabled { opacity: 0.4; cursor: default; }
@@ -254,7 +259,6 @@ table.board th { color: var(--muted); font-weight: 700; }
       <h2 id="nTitle">第 2 架準備起飛</h2>
       <p id="nText"></p>
       <button class="btn go" id="nGo">起飛</button>
-      <button class="btn invBtn"></button>
     </div>
   </section>
 
@@ -324,7 +328,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.13（上下反轉、不限時模式）';
+const VERSION = '2.14（Y軸反轉開關）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -1581,7 +1585,7 @@ function launchSortie() {
   if (G.mode === 'practice') contacts.set(SELF.id, SELF);
   S.down = null; S.dead = 0; S.mAlert = false; netOv.visible = false; fpvPass.uniforms.glitch.value = 0; fpvPass.uniforms.grain.value = 0.06; alertMsg(null);
   $('endCard').hidden = true; $('nosig').hidden = true; show(null); setView('student');
-  if (!ME.tipShown) { ME.tipShown = true; F.tipT = 7; $('sTip').innerHTML = MOBILE ? `左邊推桿：轉向、${INVY ? '往上推俯衝、往下推抬頭（上下反轉）' : '往上推抬頭、往下推俯衝'}<br>右邊按住「加速」：飛更快，但轉彎變鈍<br>貼地飛（離地 10 公尺內）可以甩掉飛彈` : `方向鍵或 W A S D：轉向、${INVY ? '抬頭、俯衝（上下反轉）' : '抬頭、俯衝'}<br>按住空白鍵：加速（轉彎變鈍）<br>貼地飛（離地 10 公尺內）可以甩掉飛彈`; $('sTip').hidden = false; }
+  if (!ME.tipShown) { ME.tipShown = true; F.tipT = 7; $('sTip').innerHTML = MOBILE ? `左邊推桿：轉向、${INVY ? '往上推俯衝、往下推抬頭（Y軸反轉：開）' : '往上推抬頭、往下推俯衝'}<br>右邊按住「加速」：飛更快，但轉彎變鈍<br>貼地飛（離地 10 公尺內）可以甩掉飛彈` : `方向鍵或 W A S D：轉向、${INVY ? '抬頭、俯衝（Y軸反轉：開）' : '抬頭、俯衝'}<br>按住空白鍵：加速（轉彎變鈍）<br>貼地飛（離地 10 公尺內）可以甩掉飛彈`; $('sTip').hidden = false; }
   sendPos(S_FLY);
 }
 function sendPos(state) {
@@ -1823,7 +1827,7 @@ function showResult() {
 
 /* ---------- 上下操控反轉（每位同學自己選，記在自己的手機） ---------- */
 let INVY = store.get('invy', false);
-function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.textContent = INVY ? '上下操控：反轉（往上推＝俯衝）' : '上下操控：一般（往上推＝抬頭）'; b.classList.toggle('on', INVY); }); }
+function renderInv() { document.querySelectorAll('.invBtn').forEach(b => { b.innerHTML = `<span>Y軸反轉<small style="display:block;font-size:14px;color:#aab5b0;font-weight:700">${INVY ? '往上推＝俯衝' : '往上推＝抬頭'}</small></span><b class="sw">${INVY ? '開' : '關'}</b>`; b.classList.toggle('on', INVY); }); }
 document.querySelectorAll('.invBtn').forEach(b => b.addEventListener('click', () => { INVY = !INVY; store.set('invy', INVY); renderInv(); }));
 renderInv();
 /* ---------- 觸控推桿與按鍵 ---------- */
