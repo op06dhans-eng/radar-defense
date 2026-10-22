@@ -320,7 +320,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.9（手機開老師網址時提醒）';
+const VERSION = '2.10（iPhone 畫面閃爍修正）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -2555,15 +2555,26 @@ function setView(m) {
   renderer.toneMappingExposure = 0.78;
   if (m !== 'student') { $('nosig').hidden = true; $('endCard').hidden = true; $('sAlert').hidden = true; netOv.visible = false; fpvPass.uniforms.glitch.value = 0; }
 }
+// iPhone 的 Safari 工具列出現或收起時，畫面大小會改變；改變大小會清空畫布。
+// 所以：大小沒變就不重設；有變就立刻重畫一張，避免中間出現一張全黑的畫面（閃一下）。
+let RENDER_OK = false; const LAST = { w: 0, h: 0, pr: 0, fov: 0 };
 function resize() {
   const w = view.clientWidth, h = view.clientHeight; const dpr = devicePixelRatio || 1;
   const pr = QUALITY === 'high' ? Math.min(dpr, 1.5) : Math.min(dpr, 1.5) * 0.62;
+  const same = w === LAST.w && h === LAST.h && pr === LAST.pr;
+  if (same && camera.fov === LAST.fov) return;
+  LAST.w = w; LAST.h = h; LAST.pr = pr; LAST.fov = camera.fov;
+  if (!same) redrawSoon();
   renderer.setPixelRatio(pr); renderer.setSize(w, h, false); composer.setPixelRatio(pr); composer.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
   fpvPass.uniforms.aspect.value = gradePass.uniforms.aspect.value = w / h;
   const s = h * pr / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))); smoke.mat.uniforms.scale.value = fire.mat.uniforms.scale.value = s;
 }
+function redrawSoon() { if (!RENDER_OK) return; queueMicrotask(() => { try { if (MODE === 'student') renderMask(); composer.render(); } catch (_) {} }); }
 new ResizeObserver(resize).observe(view);
+// 手機記憶體不足時瀏覽器可能收回繪圖資源：顯示提示，資源恢復後重新載入
+$('c').addEventListener('webglcontextlost', (e) => { e.preventDefault(); $('load').textContent = '畫面重新載入中…'; $('load').hidden = false; });
+$('c').addEventListener('webglcontextrestored', () => location.reload());
 function applyQuality() {
   renderer.shadowMap.enabled = QUALITY === 'high'; sun.castShadow = QUALITY === 'high';
   scene.traverse(o => { if (o.material && o.material.needsUpdate !== undefined) o.material.needsUpdate = true; });
@@ -2633,6 +2644,7 @@ else {
   show('scrRole'); $('roleT').onclick = () => teacherInit(); $('roleS').onclick = () => studentInit();
   document.querySelectorAll('.backrole').forEach(b => { b.hidden = false; b.onclick = () => location.reload(); });
 }
+RENDER_OK = true;
 requestAnimationFrame(frame);
 // 測試用
 window.__rd = { SFX, NET, TS, G, F, S, ME, DEF, STATIONS, contacts, IN, get META() { return META; }, get PLAYERS() { return PLAYERS; }, get TPLAYERS() { return TPLAYERS; }, get MODE() { return MODE; },
