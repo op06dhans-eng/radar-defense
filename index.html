@@ -340,7 +340,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.23（機砲改用真實錄音）';
+const VERSION = '2.24（子彈劃過、擦過、擊中改用真實錄音）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -875,7 +875,7 @@ const SFX = (() => {
     master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     gunBufs = [0, 1, 2, 3, 4].map(makeGunShot);
-    loadRealGun();
+    loadRealGun(); loadRic();
     // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
     L.motor = loopOsc(['sawtooth', 'sawtooth', 'triangle'], 'lowpass', MOBILE ? 3200 : 1800); // 螺旋槳：手機喇叭低音弱，保留較多高頻的嗡鳴
     L.wind = loopNoise('bandpass', 520, 0.7);
@@ -979,6 +979,20 @@ const SFX = (() => {
     for (let i = 0; i < nT; i++) { const t = i / sr; const x = a[i] * (t < 0.008 ? 1 : Math.exp(-(t - 0.008) / 0.13)); acc += kl * (x - acc); tail[i] = Math.tanh((0.55 * x + 0.45 * acc) * 0.6) * 0.9 / pk; }
     const mk = (d) => { const b = ctx.createBuffer(1, d.length, sr); b.getChannelData(0).set(d); return b; };
     return { loop: mk(loop), tail: mk(tail) };
+  }
+  /* ---- 子彈的真實錄音（老師提供，來源 Pixabay）：劃過（從身邊飛過）、擦過（打到機身彈開）、擊中 ----
+     幾個檔案剪成一段一段後接成一個檔（sfx/ricochet.mp3），這裡記每一段的開始秒數與長度 */
+  const RIC = {"fly": [[0.0, 0.27], [0.35, 0.25], [0.68, 0.38], [1.14, 0.38], [1.6, 0.38], [2.06, 0.25], [2.39, 0.27], [2.74, 0.37], [3.19, 0.27], [3.54, 0.26], [3.88, 0.38], [4.34, 0.26], [4.68, 0.26], [5.02, 0.38]], "graze": [[5.48, 0.6], [6.16, 0.6], [6.84, 0.6], [7.52, 0.6], [8.2, 0.284]], "hit": [[8.564, 0.9]]};
+  let ricBuf = null;
+  function loadRic() {
+    fetch('sfx/ricochet.mp3').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(b => new Promise((res, rej) => ctx.decodeAudioData(b, res, rej))).then(buf => { ricBuf = buf; })
+      .catch(e => console.warn('子彈音效檔載入失敗，改用合成聲', e));
+  }
+  function ricPlay(kind, gain, pan, delay = 0) {
+    const list = RIC[kind]; const [off, dur] = list[Math.floor(Math.random() * list.length)];
+    const s = ctx.createBufferSource(); s.buffer = ricBuf; s.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const g = out(gain, pan); g.gain.value = gain; s.connect(g); s.start(ctx.currentTime + delay, off, dur); // 長度以檔案時間計
   }
   let brr = null;
   function useLoop(buffer, send) {
@@ -1094,10 +1108,12 @@ const SFX = (() => {
       playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g, 0.35);
     },
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
-    _peek() { return { real: !!realGun, realLen: realGun && +realGun.loop.duration.toFixed(2), bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
+    _peek() { return { ric: !!ricBuf, real: !!realGun, realLen: realGun && +realGun.loop.duration.toFixed(2), bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
     gunBurst(firing, n) { burstOn = !!firing && n > 0 && ok(); burstN = n; },
+    // 子彈擦過機身彈開
+    graze() { if (!ok() || !ricBuf) return; ricPlay('graze', 0.65, (Math.random() - 0.5) * 1.2); },
     // 子彈從身邊飛過的咻聲
-    whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
+    whizz() { if (!ok()) return; if (ricBuf) { ricPlay('fly', 0.55, (Math.random() - 0.5) * 1.4); return; } noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
     // 飛彈發射：低沉的推進聲逐漸升高
     missile(p) { if (!ok()) return; const s = spatial(p, 70); noiseHit('lowpass', 400, 2600, 0.7, 0.5 * s.g, 0.12, 1.4, s.pan); tone('sawtooth', 70, 140, 0.12 * s.g, 0.1, 1.2, s.pan); },
     // 攔截網：氣壓發射的砰一聲加風聲
@@ -1113,7 +1129,8 @@ const SFX = (() => {
     // 自己被擊中
     hit(type) {
       if (!ok()) return;
-      if (type === 'gun') { tone('square', 640, 380, 0.16, 0.003, 0.12); tone('square', 930, 600, 0.1, 0.003, 0.1); noiseHit('bandpass', 2500, 800, 1, 0.4, 0.003, 0.18); }
+      if (type === 'gun' && ricBuf) { ricPlay('hit', 0.85, 0); ricPlay('graze', 0.4, (Math.random() - 0.5), 0.07); noiseHit('bandpass', 2500, 800, 1, 0.25, 0.003, 0.18); }
+      else if (type === 'gun') { tone('square', 640, 380, 0.16, 0.003, 0.12); tone('square', 930, 600, 0.1, 0.003, 0.1); noiseHit('bandpass', 2500, 800, 1, 0.4, 0.003, 0.18); }
       else if (type === 'missile') { noiseHit('lowpass', 900, 120, 0.6, 0.45, 0.04, 1.3); tone('sine', 55, 25, 0.4, 0.05, 1.0); }
       else if (type === 'mw') { tone('square', 1200, 90, 0.12, 0.01, 0.6); noiseHit('highpass', 6000, 2000, 0.5, 0.18, 0.01, 0.5); }
       else if (type === 'net') { tone('sine', 100, 40, 0.35, 0.005, 0.2); noiseHit('bandpass', 700, 300, 1.5, 0.25, 0.01, 0.35); }
@@ -1399,7 +1416,7 @@ function updateWeapons(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i]; tr.life += dt; const prev = tr.m.position.clone(); tr.m.position.addScaledVector(tr.v, dt);
     if (DEF.auth) for (const c of contacts.values()) { if (!c.alive || c.netting) continue; if (segDist(prev, tr.m.position, c.pos) < (c.isSelf ? 1.9 : 2.6)) { if (R() < (c.isSelf && DEF.selfHit !== undefined ? DEF.selfHit : 0.16)) DEF.kill(c, 'gun'); } }
-    if (MODE === 'student' && SELF && SELF.alive) { const sd = segDist(prev, tr.m.position, camera.position); if (sd < 5) nearMiss(); }
+    if (MODE === 'student' && SELF && SELF.alive) { const sd = segDist(prev, tr.m.position, camera.position); if (sd < 2.4 && !tr.grazed) { tr.grazed = true; grazeHit(); } else if (sd < 5) nearMiss(); } // 2.4 公尺內：擦過機身；5 公尺內：從身邊劃過
     if (tr.life > 1.4) { scene.remove(tr.m); tracers.splice(i, 1); }
   }
   // 飛彈：先爬升再俯衝，飛行軌跡在天空中看得到
@@ -1536,6 +1553,14 @@ function show(id) { for (const s of ['scrRole', 'scrJoin', 'scrWait', 'scrCount'
 function alertMsg(t) { const a = $('sAlert'); if (!t) { a.hidden = true; return; } a.textContent = t; a.hidden = false; }
 function hitFlash(a, blue) { S.hitA = a; $('hitfx').classList.toggle('blue', !!blue); }
 let nearT = 0;
+// 子彈擦過機身（沒有被擊落）：彈開的金屬聲、畫面一震、機鼻前幾點火花
+let grazeT = 0;
+function grazeHit() {
+  const now = performance.now(); if (now - grazeT < 150) return; grazeT = now;
+  SFX.graze(); S.shake = Math.max(S.shake, 0.35);
+  const fwd = camera.getWorldDirection(V()); const p = camera.position.clone().addScaledVector(fwd, 1.6);
+  for (let i = 0; i < 4; i++) fire.spawn(p.clone().add(V((R() - 0.5) * 0.8, (R() - 0.6) * 0.5, (R() - 0.5) * 0.8)), V((R() - 0.5) * 6, R() * 3, (R() - 0.5) * 6), { life: 0.12, s0: 0.07, s1: 0.02, a: 1, c0: [6, 4, 1.6] });
+}
 function nearMiss() { if (nearT > 0) return; nearT = 0.25; SFX.whizz(); S.shake = Math.max(S.shake, 0.25); }
 
 /* ---------- 選隊 ---------- */
