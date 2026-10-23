@@ -340,7 +340,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.22（撞擊聲恢復原本的樣子）';
+const VERSION = '2.23（機砲改用真實錄音）';
 const Q = new URLSearchParams(location.search);
 const LOCAL = Q.has('local') || !FIREBASE_CONFIG.databaseURL;
 // 主網址（index.html）是老師畫面；學生掃 QR Code 進 play.html
@@ -875,6 +875,7 @@ const SFX = (() => {
     master = ctx.createGain(); master.gain.value = on ? 0.75 : 0; master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     gunBufs = [0, 1, 2, 3, 4].map(makeGunShot);
+    loadRealGun();
     // 持續的聲音：自己的馬達、風切、別人的無人機、飛彈火箭、雜訊
     L.motor = loopOsc(['sawtooth', 'sawtooth', 'triangle'], 'lowpass', MOBILE ? 3200 : 1800); // 螺旋槳：手機喇叭低音弱，保留較多高頻的嗡鳴
     L.wind = loopNoise('bandpass', 520, 0.7);
@@ -946,20 +947,68 @@ const SFX = (() => {
     for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < n; i++) d[i] *= 0.95 / pk; }
     return buf;
   }
+  /* ---- 真實錄音的防空機砲聲（老師提供的砲聲檔，來源 Pixabay） ----
+     每一發只取砲聲最前面的爆裂並快速收掉，每秒 45 發疊成兩秒長、可無縫重複的迴圈；
+     原檔較長的轟鳴壓低音量墊在底下；停火時另外播一段平滑往下掉的餘音（不用原檔後段那個奇怪的回音）。
+     檔案載入失敗時（例如預覽頁），沿用程式合成的機砲聲。 */
+  let realGun = null;
+  function loadRealGun() {
+    fetch('sfx/cannon.mp3').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(b => new Promise((res, rej) => ctx.decodeAudioData(b, res, rej)))
+      .then(buf => { realGun = buildRealGun(buf); if (brr) useLoop(realGun.loop, 0.25); })
+      .catch(e => console.warn('砲聲檔載入失敗，改用合成機砲聲', e));
+  }
+  function buildRealGun(buf) {
+    const sr = buf.sampleRate; let a = buf.getChannelData(0);
+    if (buf.numberOfChannels > 1) { const b2 = buf.getChannelData(1); a = a.map((x, i) => (x + b2[i]) / 2); }
+    let st = 0; while (st < a.length - 1 && Math.abs(a[st]) < 0.05) st++; a = a.subarray(st);
+    const RATE = 45, L = Math.floor(sr * 2), tau = Math.min(0.035, 0.45 / RATE), tg = 0.35 / Math.sqrt(RATE);
+    const nS = Math.min(a.length - 2, Math.floor(sr * 0.2)), nB = Math.min(a.length - 2, Math.floor(sr * 0.55)), fB = Math.floor(sr * 0.25);
+    const loop = new Float32Array(L);
+    const add = (t0, r, g, body) => {
+      const n = body ? nB : nS; const m = Math.floor((n - 1) / r);
+      for (let i = 0; i < m; i++) {
+        const p = i * r, k = Math.floor(p), fr = p - k; let x = a[k] * (1 - fr) + a[k + 1] * fr; const tt = p / sr;
+        if (body) { if (k > nB - fB) x *= (nB - k) / fB; x *= tg; } else x *= tt < 0.006 ? 1 : Math.exp(-(tt - 0.006) / tau);
+        loop[(t0 + i) % L] += x * g;
+      }
+    };
+    for (let k = 0; k < RATE * 2; k++) { const t0 = ((Math.floor(sr * (k / RATE + (Math.random() - 0.5) * 0.004)) % L) + L) % L; const r = 0.94 + Math.random() * 0.12, g = 0.85 + Math.random() * 0.15; add(t0, r, g, false); add(t0, r, g, true); }
+    let pk = 0; for (let i = 0; i < L; i++) { loop[i] = Math.tanh(loop[i] * 0.6); pk = Math.max(pk, Math.abs(loop[i])); } for (let i = 0; i < L; i++) loop[i] *= 0.9 / pk;
+    const nT = Math.min(a.length, Math.floor(sr * 0.7)), tail = new Float32Array(nT); const kl = 1 - Math.exp(-2 * Math.PI * 1800 / sr); let acc = 0;
+    for (let i = 0; i < nT; i++) { const t = i / sr; const x = a[i] * (t < 0.008 ? 1 : Math.exp(-(t - 0.008) / 0.13)); acc += kl * (x - acc); tail[i] = Math.tanh((0.55 * x + 0.45 * acc) * 0.6) * 0.9 / pk; }
+    const mk = (d) => { const b = ctx.createBuffer(1, d.length, sr); b.getChannelData(0).set(d); return b; };
+    return { loop: mk(loop), tail: mk(tail) };
+  }
   let brr = null;
+  function useLoop(buffer, send) {
+    if (brr.src) { try { brr.src.stop(); } catch (_) {} }
+    const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true; src.connect(brr.f); src.start();
+    brr.src = src; brr.sg.gain.value = send;
+  }
   function gunLoop(gain, cutoff) {
     if (!gunBufs.length) return;
     if (!brr) {
       if (!verb) verb = makeVerb();
-      const src = ctx.createBufferSource(); src.buffer = makeBrrrt(); src.loop = true;
       const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 12000; f.Q.value = 0.4;
       const g = ctx.createGain(); g.gain.value = 0; const sg = ctx.createGain(); sg.gain.value = 0.8;
-      src.connect(f); f.connect(g); g.connect(master); g.connect(sg); sg.connect(verb); src.start();
-      brr = { g, f };
+      f.connect(g); g.connect(master); g.connect(sg); sg.connect(verb);
+      brr = { g, f, sg, src: null, firing: false, lvl: 0 };
+      if (realGun) useLoop(realGun.loop, 0.25); else useLoop(makeBrrrt(), 0.8);
     }
-    brr.g.gain.setTargetAtTime(gain, ctx.currentTime, gain > brr.g.gain.value ? 0.012 : 0.035);
+    const on = gain > 0.02;
+    if (on) brr.lvl = gain;
+    // 停火：播一段平滑的餘音
+    if (brr.firing && !on && realGun) {
+      const s = ctx.createBufferSource(); s.buffer = realGun.tail; const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = brr.f.frequency.value; fl.Q.value = 0.4;
+      const tg = ctx.createGain(); tg.gain.value = brr.lvl * (realGun ? REAL_GAIN : 1); s.connect(fl); fl.connect(tg); tg.connect(master); s.start();
+    }
+    brr.firing = on;
+    const k = realGun ? REAL_GAIN : 1;
+    brr.g.gain.setTargetAtTime(gain * k, ctx.currentTime, gain * k > brr.g.gain.value ? 0.012 : 0.03);
     brr.f.frequency.setTargetAtTime(cutoff, ctx.currentTime, 0.05);
   }
+  const REAL_GAIN = 0.85;
   function scheduleGuns() {}
   const ROOTS = [55, 43.65, 49, 41.2]; // A、F、G、E
   const BASS = [1, 1, 2, 1, 1, 2, 1, 1.5];
@@ -1045,7 +1094,7 @@ const SFX = (() => {
       playShot(now, 0.85 * s.g, s.pan, 900 + 8000 * s.g * s.g, 0.35);
     },
     // 老師按住左鍵時，四座機槍塔的連續射擊（節奏穩定，座數越少越慢）
-    _peek() { return { bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
+    _peek() { return { real: !!realGun, realLen: realGun && +realGun.loop.duration.toFixed(2), bufs: gunBufs.length, len: gunBufs[0] && gunBufs[0].length, nan: gunBufs.some(b => b.getChannelData(0).some(x => !isFinite(x))), burstOn, loop: brr ? +brr.g.gain.value.toFixed(2) : null, state: ctx && ctx.state }; },
     gunBurst(firing, n) { burstOn = !!firing && n > 0 && ok(); burstN = n; },
     // 子彈從身邊飛過的咻聲
     whizz() { if (!ok()) return; noiseHit('bandpass', 4200, 1400, 4, 0.22, 0.01, 0.16, (Math.random() - 0.5) * 1.2); },
