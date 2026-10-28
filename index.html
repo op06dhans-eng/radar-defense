@@ -2639,7 +2639,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.27（修正機砲有時停不下來；發布新版時手機自動重新載入；下載的檔案直接打開也能用）';
+const VERSION = '2.28（遊戲大廳：學生掃一次 QR Code，老師打開哪款就進哪款；修正機砲有時停不下來；發布新版時手機自動重新載入；下載的檔案直接打開也能用）';
 // 直接在電腦上打開下載的檔案時（網址是 file://），旁邊沒有圖檔和音效資料夾，改從 GitHub 網站載入
 const ASSET = location.protocol === 'file:' ? 'https://op06dhans-eng.github.io/radar-defense/' : '';
 // 新版自動重新載入：Safari 會暫存舊網頁，拿 version.txt 比對，不同就換網址重新載入（每個分頁只試一次）
@@ -2718,6 +2718,7 @@ function makeLocalNet() {
     on(path, cb) { const s = { path, kind: 'value', cb }; subs.add(s); queueMicrotask(() => cb(clone(getAt(path)))); return () => subs.delete(s); },
     onChild(path, h) { const s = { path, kind: 'child', ...h }; subs.add(s); queueMicrotask(() => { const cur = getAt(path); if (cur && typeof cur === 'object' && h.added) for (const k in cur) h.added(k, clone(cur[k])); }); return () => subs.delete(s); },
     onDisconnectRemove(path) { offs.push(path); },
+    onRaw() { return () => {}; },
     resetRoot(v) { send({ t: 'root', path: '', v }); },
   };
   addEventListener('pagehide', () => { for (const p of offs) try { ch.postMessage({ t: 'set', path: p, v: null }); } catch (_) {} });
@@ -2741,6 +2742,7 @@ async function makeFirebaseNet(cfg) {
     on: (p, cb) => D.onValue(R(p), (s) => cb(s.val())),
     onChild(p, h) { const u = []; if (h.added) u.push(D.onChildAdded(R(p), (s) => h.added(s.key, s.val()))); if (h.changed) u.push(D.onChildChanged(R(p), (s) => h.changed(s.key, s.val()))); if (h.removed) u.push(D.onChildRemoved(R(p), (s) => h.removed(s.key))); return () => u.forEach(f => f()); },
     onDisconnectRemove: (p) => D.onDisconnect(R(p)).remove(),
+    onRaw: (p, cb) => D.onValue(D.ref(db, p), (s) => cb(s.val())), // 讀另一款遊戲的資料（遊戲大廳用）
     resetRoot: (v) => D.set(R(''), v),
   };
   D.onValue(D.ref(db, '.info/serverTimeOffset'), (s) => { offset = s.val() || 0; });
@@ -3893,7 +3895,20 @@ function joinTeam(t, silent) {
   $('joinMsg').textContent = '等待老師的電腦確認…';
   clearTimeout(ME.joinTO); ME.joinTO = setTimeout(() => { if (ME.team < 0) { ME.waitingJoin = false; renderPick(); $('joinMsg').textContent = '老師的畫面沒有回應。請確認老師已經打開遊戲，再選一次。'; } }, 8000);
 }
+// 遊戲大廳：老師後來打開了另一款遊戲，學生手機自動跳過去（12 小時內、比這款更晚打開的才算）
+function followLobby() {
+  const L = { mine: null, other: null, n: 0 }; let gone = false;
+  const check = () => {
+    if (gone || L.n < 2 || !L.other || !L.other.at || L.other.game !== 'convoy') return; const now = NET.now();
+    if (now - L.other.at > 12 * 3600 * 1000 || (L.mine && L.mine.at >= L.other.at)) return;
+    gone = true; const url = location.origin + location.pathname.replace(/[^/]*\/[^/]*$/, '') + 'supply-convoy/play.html';
+    document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;inset:0;z-index:99;background:rgba(10,12,14,0.94);display:grid;place-items:center;color:#fff;font:900 26px sans-serif;text-align:center;padding:20px">老師換到另一款遊戲了<br>正在帶你過去…</div>');
+    setTimeout(() => location.replace(url), 900);
+  };
+  let a = 0, b = 0; NET.on('lobby', (v) => { L.mine = v; if (!a) { a = 1; L.n++; } check(); }); NET.onRaw('sr/lobby', (v) => { L.other = v; if (!b) { b = 1; L.n++; } check(); });
+}
 function studentInit() {
+  if (!NET.local && location.protocol !== 'file:') followLobby();
   ROLE = 'student'; show('scrJoin'); renderPick();
   $('joinMsg').textContent = NET.local ? '練習連線模式：老師畫面要開在同一台電腦的另一個分頁。' : '選好隊伍後，等老師叫你們這一隊上場。';
   NET.on('players', (p) => {
@@ -4313,7 +4328,9 @@ function applyCfg() { ST_INFO.radar.hp = CFG.hp; STATIONS.radar.max = CFG.hp; SO
 const UNLIMITED_CAP = 1800, IDLE_END = 25;
 // 學生網址：從 GitHub 網頁打開時用同一個資料夾的 play.html；從下載的檔案打開時，固定指向 GitHub 上的學生網址
 const PUBLIC_PLAY = 'https://op06dhans-eng.github.io/radar-defense/play.html';
-function studentURL() { return location.protocol === 'file:' ? PUBLIC_PLAY : location.origin + location.pathname.replace(/[^/]*$/, '') + 'play.html'; }
+// QR Code 指向遊戲大廳 go.html：學生掃一次，老師打開哪款遊戲，手機就自動進哪款
+function studentURL() { return location.protocol === 'file:' ? PUBLIC_PLAY.replace('play.html', 'go.html') : location.origin + location.pathname.replace(/[^/]*$/, '') + 'go.html'; }
+function claimLobby() { NET.set('lobby', { game: 'radar', at: NET.now() }); }
 
 function teacherInit() {
   ROLE = 'teacher'; show(null); setView('defend'); $('tPanel').hidden = false;
@@ -4328,6 +4345,7 @@ function teacherInit() {
   let first = true;
   const unsub = NET.on('meta', (m) => {
     if (!first) return; first = false; setTimeout(() => unsub && unsub(), 0);
+    setTimeout(claimLobby, 1200); // 老師打開這款遊戲：大廳裡的學生手機自動跳過來
     if (m && m.sid) { TS.sid = m.sid; TS.wave = m.wave || 0; TS.phase = 'lobby'; NET.set('meta', { sid: TS.sid, phase: 'lobby', team: -1, wave: TS.wave }); }
     else newSession();
   });
@@ -4405,6 +4423,7 @@ function applyImpact(k, p, c) {
 
 /* ---------- 波次 ---------- */
 function tStartWave(team) {
+  claimLobby();
   if (TS.phase === 'count' || TS.phase === 'wave') return;
   if (TS.rehearsal) stopRehearsal();
   finishReplay(true);
