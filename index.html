@@ -2663,7 +2663,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: '528664638395',
   appId: '1:528664638395:web:e478a9b393bbfe4b85ca9e',
 };
-const VERSION = '2.30（遊戲大廳加入第三款「片場」；起飛前選機種（無線電／光纖）、防守隊用手機操作機槍塔與微波、全班共同目標；遊戲大廳：學生掃一次 QR Code，老師打開哪款就進哪款；修正機砲有時停不下來；發布新版時手機自動重新載入；下載的檔案直接打開也能用）';
+const VERSION = '2.31（修正遊戲大廳：第三款改為城市反恐，手機自動跳轉恢復正常；起飛前選機種（無線電／光纖）、防守隊用手機操作機槍塔與微波、全班共同目標；遊戲大廳：學生掃一次 QR Code，老師打開哪款就進哪款；修正機砲有時停不下來；發布新版時手機自動重新載入；下載的檔案直接打開也能用）';
 // 直接在電腦上打開下載的檔案時（網址是 file://），旁邊沒有圖檔和音效資料夾，改從 GitHub 網站載入
 const ASSET = location.protocol === 'file:' ? 'https://op06dhans-eng.github.io/radar-defense/' : '';
 // 新版自動重新載入：Safari 會暫存舊網頁，拿 version.txt 比對，不同就換網址重新載入（每個分頁只試一次）
@@ -3922,7 +3922,7 @@ function joinTeam(t, silent) {
 // 遊戲大廳：老師後來打開了另一款遊戲，學生手機自動跳過去（12 小時內、比這款更晚打開的才算）
 function followLobby() {
   // 遊戲大廳：老師後來打開了另一款遊戲（三款共用），學生手機自動跳過去
-  const OTHERS = { sr: 'supply-convoy', rd: 'radar-defense', fs: 'Gun-movie' }; delete OTHERS['rd'];
+  const OTHERS = { sr: 'supply-convoy', rd: 'radar-defense', 'sr/ct': 'Gun-movie' }; delete OTHERS['rd'];
   const L = { mine: null, others: {}, n: 0 }; let gone = false;
   const check = () => {
     if (gone || L.n < 3) return; const now = NET.now();
